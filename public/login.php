@@ -7,20 +7,14 @@
  * Authentication controller. Handles user credential verification and 
  * session initialisation.
  * 
- * Architectural Role:
- * Acts as the primary entry point for user authentication. It delegates 
- * credential verification to the User model and manages session state 
- * transitions securely.
- * 
  * Security:
- * - Uses timing-safe comparison (hash_equals) for CSRF tokens to prevent 
- *   Cross-Site Request Forgery (CSRF).
+ * - Uses timing-safe comparison (hash_equals) for CSRF tokens.
  * - Regenerates session ID upon successful login to prevent session fixation.
  * - Returns generic error messages to prevent user enumeration attacks.
- * - Enforces strict input sanitisation via trim() before processing.
  */
 declare(strict_types=1);
 
+// Fixed: Added '/../' to navigate up to the root config and src directories
 require_once __DIR__ . '/../config/Session.php';
 require_once __DIR__ . '/../src/models/User.php';
 

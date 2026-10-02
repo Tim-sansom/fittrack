@@ -10,7 +10,8 @@
  */
 declare(strict_types=1);
 
-require_once __DIR__ . '/config/Session.php';
+// Fixed: Added '/../' to navigate up to the root config directory
+require_once __DIR__ . '/../config/Session.php';
 
 Session::start();
 Session::destroy();

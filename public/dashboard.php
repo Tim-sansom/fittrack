@@ -6,10 +6,6 @@
  * Purpose:
  * Primary user interface. Acts as a Single Page Application (SPA) shell 
  * that loads data dynamically via the API endpoints in /public/api/.
- * 
- * Architectural Role:
- * Separates the presentation layer (HTML/CSS) from the data layer (API).
- * The PHP portion only handles session validation and layout inclusion.
  */
 declare(strict_types=1);
 
@@ -23,95 +19,145 @@ if (!isset($_SESSION['user_id'])) {
 }
 
 $pageTitle = 'Dashboard';
+$currentPage = 'dashboard'; // Set active state for sidebar
+
 require_once __DIR__ . '/includes/header.php';
+require_once __DIR__ . '/includes/sidebar.php'; // Include the new sidebar
 ?>
 
-<div class="dashboard-grid">
-    <!-- Left Column: Visualizations -->
-    <div>
-        <div class="stats-row">
-            <div class="stat-card">
-                <div class="ring-container">
-                    <svg viewBox="0 0 100 100" width="100" height="100">
-                        <circle class="ring-bg" cx="50" cy="50" r="42"></circle>
-                        <circle class="ring-progress" id="workoutRing" cx="50" cy="50" r="42" stroke-dasharray="264" stroke-dashoffset="264"></circle>
-                    </svg>
-                    <div class="ring-text" id="workoutCount">0</div>
+<!-- Main Content Wrapper. Must be a sibling of .sidebar for CSS collapse logic -->
+<div class="main-content">
+    <div class="dashboard-grid">
+        <!-- Left Column: Visualizations -->
+        <div>
+            <div class="stats-row">
+                <div class="stat-card">
+                    <div class="ring-container">
+                        <svg viewBox="0 0 100 100" width="100" height="100">
+                            <circle class="ring-bg" cx="50" cy="50" r="42"></circle>
+                            <circle class="ring-progress" id="workoutRing" cx="50" cy="50" r="42" stroke-dasharray="264" stroke-dashoffset="264"></circle>
+                        </svg>
+                        <div class="ring-text" id="workoutCount">0</div>
+                    </div>
+                    <div>Workouts This Week</div>
                 </div>
-                <div>Workouts This Week</div>
-            </div>
-            <div class="stat-card">
-                <div class="ring-container">
-                    <svg viewBox="0 0 100 100" width="100" height="100">
-                        <circle class="ring-bg" cx="50" cy="50" r="42"></circle>
-                        <circle class="ring-progress" id="durationRing" cx="50" cy="50" r="42" stroke-dasharray="264" stroke-dashoffset="264" style="stroke: var(--highlight)"></circle>
-                    </svg>
-                    <div class="ring-text" id="durationCount">0</div>
+                <div class="stat-card">
+                    <div class="ring-container">
+                        <svg viewBox="0 0 100 100" width="100" height="100">
+                            <circle class="ring-bg" cx="50" cy="50" r="42"></circle>
+                            <circle class="ring-progress" id="durationRing" cx="50" cy="50" r="42" stroke-dasharray="264" stroke-dashoffset="264" style="stroke: var(--highlight)"></circle>
+                        </svg>
+                        <div class="ring-text" id="durationCount">0</div>
+                    </div>
+                    <div>Minutes Active</div>
                 </div>
-                <div>Minutes Active</div>
-            </div>
-            <div class="stat-card">
-                <div class="ring-container">
-                    <svg viewBox="0 0 100 100" width="100" height="100">
-                        <circle class="ring-bg" cx="50" cy="50" r="42"></circle>
-                        <circle class="ring-progress" id="calorieRing" cx="50" cy="50" r="42" stroke-dasharray="264" stroke-dashoffset="264" style="stroke: var(--success)"></circle>
-                    </svg>
-                    <div class="ring-text" id="calorieBalance">0</div>
+                <div class="stat-card">
+                    <div class="ring-container">
+                        <svg viewBox="0 0 100 100" width="100" height="100">
+                            <circle class="ring-bg" cx="50" cy="50" r="42"></circle>
+                            <circle class="ring-progress" id="calorieRing" cx="50" cy="50" r="42" stroke-dasharray="264" stroke-dashoffset="264" style="stroke: var(--success)"></circle>
+                        </svg>
+                        <div class="ring-text" id="calorieBalance">0</div>
+                    </div>
+                    <div>Net Calories Today</div>
                 </div>
-                <div>Net Calories Today</div>
+            </div>
+
+            <div class="card">
+                <h2>Activity Distribution</h2>
+                <div class="chart-container">
+                    <div class="bar-chart" id="barChart"></div>
+                </div>
+            </div>
+
+            <div class="card">
+                <h2>7-Day Calorie Balance</h2>
+                <div class="chart-container">
+                    <svg class="wave-chart" id="waveChart" viewBox="0 0 600 200" preserveAspectRatio="none"></svg>
+                </div>
             </div>
         </div>
 
-        <div class="card">
-            <h2>Activity Distribution</h2>
-            <div class="chart-container"><div class="bar-chart" id="barChart"></div></div>
-        </div>
-
-        <div class="card">
-            <h2>7-Day Calorie Balance</h2>
-            <div class="chart-container">
-                <svg class="wave-chart" id="waveChart" viewBox="0 0 600 200" preserveAspectRatio="none"></svg>
+        <!-- Right Column: Actions & Plans -->
+        <div>
+            <div class="card">
+                <h2>3-Day Full Body Split</h2>
+                <div class="plan-day">
+                    <div class="plan-day-header"><span class="day-name">Monday</span></div>
+                    <div class="muscle-tags"><span class="tag">Chest</span><span class="tag">Back</span><span class="tag">Legs</span></div>
+                </div>
+                <div class="plan-day">
+                    <div class="plan-day-header"><span class="day-name">Tuesday</span></div>
+                    <div class="rest-day">Rest & Recovery</div>
+                </div>
+                <div class="plan-day">
+                    <div class="plan-day-header"><span class="day-name">Wednesday</span></div>
+                    <div class="muscle-tags"><span class="tag">Shoulders</span><span class="tag">Arms</span><span class="tag">Core</span></div>
+                </div>
+                <div class="plan-day">
+                    <div class="plan-day-header"><span class="day-name">Thursday</span></div>
+                    <div class="rest-day">Rest & Recovery</div>
+                </div>
+                <div class="plan-day">
+                    <div class="plan-day-header"><span class="day-name">Friday</span></div>
+                    <div class="muscle-tags"><span class="tag">Full Body</span><span class="tag">Cardio</span></div>
+                </div>
             </div>
-        </div>
-    </div>
 
-    <!-- Right Column: Actions & Plans -->
-    <div>
-        <div class="card">
-            <h2>3-Day Full Body Split</h2>
-            <div class="plan-day"><div class="plan-day-header"><span class="day-name">Monday</span></div><div class="muscle-tags"><span class="tag">Chest</span><span class="tag">Back</span><span class="tag">Legs</span></div></div>
-            <div class="plan-day"><div class="plan-day-header"><span class="day-name">Tuesday</span></div><div class="rest-day">Rest & Recovery</div></div>
-            <div class="plan-day"><div class="plan-day-header"><span class="day-name">Wednesday</span></div><div class="muscle-tags"><span class="tag">Shoulders</span><span class="tag">Arms</span><span class="tag">Core</span></div></div>
-            <div class="plan-day"><div class="plan-day-header"><span class="day-name">Thursday</span></div><div class="rest-day">Rest & Recovery</div></div>
-            <div class="plan-day"><div class="plan-day-header"><span class="day-name">Friday</span></div><div class="muscle-tags"><span class="tag">Full Body</span><span class="tag">Cardio</span></div></div>
-        </div>
+            <div class="card">
+                <h2>Log Daily Nutrition</h2>
+                <form id="nutritionForm">
+                    <div class="form-group">
+                        <label for="logDate">Date</label>
+                        <input type="date" id="logDate" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="calConsumed">Calories Consumed</label>
+                        <input type="number" id="calConsumed" placeholder="e.g. 2000" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="calBurned">Calories Burned (Exercise)</label>
+                        <input type="number" id="calBurned" placeholder="e.g. 400">
+                    </div>
+                    <button type="submit" class="btn-primary">Save Nutrition</button>
+                </form>
+            </div>
 
-        <div class="card">
-            <h2>Log Daily Nutrition</h2>
-            <form id="nutritionForm">
-                <div class="form-group"><label for="logDate">Date</label><input type="date" id="logDate" required></div>
-                <div class="form-group"><label for="calConsumed">Calories Consumed</label><input type="number" id="calConsumed" placeholder="e.g. 2000" required></div>
-                <div class="form-group"><label for="calBurned">Calories Burned (Exercise)</label><input type="number" id="calBurned" placeholder="e.g. 400"></div>
-                <button type="submit" class="btn-primary">Save Nutrition</button>
-            </form>
-        </div>
+            <div class="card">
+                <h2 id="formTitle">Log Activity</h2>
+                <form id="activityForm">
+                    <input type="hidden" id="editId" name="activity_log_id" value="">
+                    <div class="form-group">
+                        <label for="type">Activity Type</label>
+                        <select id="type" name="activity_type_id" required>
+                            <option value="1">Running</option>
+                            <option value="2">Walking</option>
+                            <option value="3">Swimming</option>
+                            <option value="4">Gym</option>
+                            <option value="5">Football</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="title">Title</label>
+                        <input type="text" id="title" name="title" placeholder="e.g. Morning Run" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="date">Date</label>
+                        <input type="date" id="date" name="activity_date" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="duration">Duration (mins)</label>
+                        <input type="number" id="duration" name="duration_minutes">
+                    </div>
+                    <button type="submit" class="btn-primary" id="submitBtn">Save Activity</button>
+                    <button type="button" class="btn-secondary" id="cancelBtn" style="display: none;">Cancel Edit</button>
+                </form>
+            </div>
 
-        <div class="card">
-            <h2 id="formTitle">Log Activity</h2>
-            <form id="activityForm">
-                <input type="hidden" id="editId" name="activity_log_id" value="">
-                <div class="form-group"><label for="type">Activity Type</label><select id="type" name="activity_type_id" required><option value="1">Running</option><option value="2">Walking</option><option value="3">Swimming</option><option value="4">Gym</option><option value="5">Football</option></select></div>
-                <div class="form-group"><label for="title">Title</label><input type="text" id="title" name="title" placeholder="e.g. Morning Run" required></div>
-                <div class="form-group"><label for="date">Date</label><input type="date" id="date" name="activity_date" required></div>
-                <div class="form-group"><label for="duration">Duration (mins)</label><input type="number" id="duration" name="duration_minutes"></div>
-                <button type="submit" class="btn-primary" id="submitBtn">Save Activity</button>
-                <button type="button" class="btn-secondary" id="cancelBtn" style="display: none;">Cancel Edit</button>
-            </form>
-        </div>
-
-        <div class="card">
-            <h2>Recent Activities</h2>
-            <div id="activityList">Loading...</div>
+            <div class="card">
+                <h2>Recent Activities</h2>
+                <div id="activityList">Loading...</div>
+            </div>
         </div>
     </div>
 </div>
@@ -135,9 +181,6 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!input.value) input.valueAsDate = new Date();
     });
 
-    /**
-     * Fetches stats and activity list from the API.
-     */
     function loadDashboard() {
         fetch('/api/dashboard_data.php')
             .then(res => res.json())
@@ -159,7 +202,10 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
                     listContainer.innerHTML = data.data.map(act => `
                         <div class="activity-item">
-                            <div><strong>${act.title}</strong> (${act.type_name})<br><small>${act.activity_date} • ${act.duration_minutes || 0} mins</small></div>
+                            <div>
+                                <strong>${act.title}</strong> (${act.type_name})<br>
+                                <small>${act.activity_date} • ${act.duration_minutes || 0} mins</small>
+                            </div>
                             <div class="action-btns">
                                 <button class="btn-edit" onclick="editActivity(${act.activity_log_id}, '${act.title}', '${act.activity_type_id}', '${act.activity_date}', '${act.duration_minutes}')">Edit</button>
                                 <button class="btn-delete" onclick="deleteActivity(${act.activity_log_id})">Delete</button>
@@ -181,10 +227,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
         let netCals = 0;
         if (nutritionData && nutritionData.length > 0) {
-             const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-             const todayName = days[new Date().getDay()];
-             const todayEntry = nutritionData.find(d => d.date === todayName);
-             if (todayEntry) netCals = todayEntry.balance;
+            const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+            const todayName = days[new Date().getDay()];
+            const todayEntry = nutritionData.find(d => d.date === todayName);
+            if (todayEntry) netCals = todayEntry.balance;
         }
         const calPercent = Math.min((Math.abs(netCals) / 2000) * 100, 100);
         animateRing('calorieRing', calPercent);
@@ -230,7 +276,6 @@ document.addEventListener('DOMContentLoaded', () => {
         svg.innerHTML = `<defs><linearGradient id="waveGradient" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="var(--accent)" stop-opacity="0.5"/><stop offset="100%" stop-color="var(--accent)" stop-opacity="0"/></linearGradient></defs><line x1="${padding}" y1="${height/2}" x2="${width-padding}" y2="${height/2}" stroke="#eee" stroke-width="2" stroke-dasharray="4"/><path class="wave-area" d="${areaD}"></path><path class="wave-line" d="${pathD}"></path>${points.map(p => `<circle class="wave-point" cx="${p.x}" cy="${p.y}" r="4"><title>${p.date}: ${p.balance} kcal</title></circle>`).join('')}${points.map((p, i) => `<text x="${p.x}" y="${height-5}" text-anchor="middle" font-size="10" fill="#666">${p.date}</text>`).join('')}`;
     }
 
-    // Expose edit function to global scope for inline onclick handlers
     window.editActivity = (id, title, typeId, date, duration) => {
         editIdInput.value = id;
         document.getElementById('title').value = title;
