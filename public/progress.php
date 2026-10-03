@@ -2,24 +2,23 @@
 /**
  * File: progress.php
  * Location: /public/progress.php
- * 
+ *
  * Purpose:
  * Provides a comprehensive visual scorecard of the user's physical progress.
  * Aggregates historical data from measurements, activities, and nutrition
  * to render interactive SVG charts via a custom Vanilla JS engine.
- * 
+ *
  * Architectural Role:
- * Demonstrates advanced client-side data visualisation. The PHP layer 
- * handles data aggregation, delta calculation, and JSON encoding, while 
+ * Demonstrates advanced client-side data visualisation. The PHP layer
+ * handles data aggregation, delta calculation, and JSON encoding, while
  * the JS layer handles rendering, scroll animations, and interaction.
- * 
+ *
  * Independent Contribution:
  * - Custom SVG charting engine (no external libraries).
  * - Multi-range time filtering (Week/Month/Year) with dynamic re-rendering.
  * - IntersectionObserver API for scroll-triggered chart animations.
  */
 declare(strict_types=1);
-
 require_once __DIR__ . '/../config/Session.php';
 require_once __DIR__ . '/../config/Database.php';
 Session::start();
@@ -39,10 +38,10 @@ $currentPage = 'progress';
 
 // 1. Fetch Latest vs Previous Measurements (for Scorecard deltas)
 $stmt = $db->prepare("
-    SELECT weight_kg, bmi, chest_cm, waist_cm, 
+    SELECT weight_kg, bmi, chest_cm, waist_cm,
            left_arm_cm, right_arm_cm, left_leg_cm, right_leg_cm, recorded_at
-    FROM user_measurements 
-    WHERE user_id = :uid 
+    FROM user_measurements
+    WHERE user_id = :uid
     ORDER BY recorded_at DESC LIMIT 2
 ");
 $stmt->execute(['uid' => $userId]);
@@ -50,18 +49,18 @@ $measurements = $stmt->fetchAll(PDO::FETCH_ASSOC);
 $latest = $measurements[0] ?? [];
 $previous = $measurements[1] ?? [];
 
-// Calculate percentage deltas safely
+// Calculate percentage deltas safely (Cast to float to prevent PDO string errors)
 $calcDelta = fn($curr, $prev) => $prev > 0 ? round((($curr - $prev) / $prev) * 100, 1) : 0;
-$weightDelta = $calcDelta($latest['weight_kg'] ?? 0, $previous['weight_kg'] ?? 0);
-$bmiDelta = $calcDelta($latest['bmi'] ?? 0, $previous['bmi'] ?? 0);
+$weightDelta = $calcDelta((float)($latest['weight_kg'] ?? 0), (float)($previous['weight_kg'] ?? 0));
+$bmiDelta = $calcDelta((float)($latest['bmi'] ?? 0), (float)($previous['bmi'] ?? 0));
 
 // 2. Fetch Historical Weight Data (for Line Chart)
 // Grouped by week for 'month' and 'year' views to reduce visual noise
 $stmt = $db->prepare("
-    SELECT DATE_FORMAT(recorded_at, '%Y-%u') as week_key, 
+    SELECT DATE_FORMAT(recorded_at, '%Y-%u') as week_key,
            MIN(recorded_at) as date, AVG(weight_kg) as avg_weight
-    FROM user_measurements 
-    WHERE user_id = :uid 
+    FROM user_measurements
+    WHERE user_id = :uid
     GROUP BY week_key
     ORDER BY date ASC
 ");
@@ -69,16 +68,17 @@ $stmt->execute(['uid' => $userId]);
 $weightHistory = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
 // Shape data for different time ranges
+// FIX: Cast $d['avg_weight'] to (float) because PDO returns decimals as strings
 $weightData = [
-    'week' => array_map(fn($d) => ['label' => date('D', strtotime($d['date'])), 'value' => round($d['avg_weight'], 1)], array_slice($weightHistory, -7)),
-    'month' => array_map(fn($d) => ['label' => 'W' . date('W', strtotime($d['date'])), 'value' => round($d['avg_weight'], 1)], array_slice($weightHistory, -4)),
-    'year' => array_map(fn($d) => ['label' => date('M', strtotime($d['date'])), 'value' => round($d['avg_weight'], 1)], array_slice($weightHistory, -12))
+    'week' => array_map(fn($d) => ['label' => date('D', strtotime($d['date'])), 'value' => round((float)$d['avg_weight'], 1)], array_slice($weightHistory, -7)),
+    'month' => array_map(fn($d) => ['label' => 'W' . date('W', strtotime($d['date'])), 'value' => round((float)$d['avg_weight'], 1)], array_slice($weightHistory, -4)),
+    'year' => array_map(fn($d) => ['label' => date('M', strtotime($d['date'])), 'value' => round((float)$d['avg_weight'], 1)], array_slice($weightHistory, -12))
 ];
 
 // 3. Fetch Activity Volume (for Area Chart)
 $stmt = $db->prepare("
     SELECT DATE(activity_date) as date, SUM(duration_minutes) as total_mins
-    FROM activity_logs 
+    FROM activity_logs
     WHERE user_id = :uid AND tenant_id = :tid
     GROUP BY DATE(activity_date)
     ORDER BY activity_date ASC

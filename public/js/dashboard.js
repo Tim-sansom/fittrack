@@ -90,18 +90,54 @@ function initBarChart() {
 }
 
 /**
+ * Aggregate daily data by week for year view.
+ * Only returns weeks with actual activity (no zero-filling) to keep the line visible.
+ */
+function aggregateByWeek(dailyData) {
+    const weeks = {};
+    
+    dailyData.forEach(day => {
+        const date = new Date(day.activity_date);
+        const dayOfWeek = date.getDay() || 7; 
+        date.setDate(date.getDate() - dayOfWeek + 1);
+        const weekKey = date.toISOString().split('T')[0];
+
+        if (!weeks[weekKey]) {
+            weeks[weekKey] = {
+                activity_date: weekKey,
+                session_count: 0,
+                total_mins: 0
+            };
+        }
+        // CRITICAL FIX: Parse as Integers to prevent string concatenation
+        weeks[weekKey].session_count += parseInt(day.session_count, 10) || 0;
+        weeks[weekKey].total_mins += parseInt(day.total_mins, 10) || 0;
+    });
+
+    // Only return weeks with activity > 0
+    return Object.values(weeks)
+        .filter(w => w.total_mins > 0)
+        .sort((a, b) => new Date(a.activity_date) - new Date(b.activity_date));
+}
+
+/**
  * Main Volume Line Chart (Week/Month/Year)
  * Draws an SVG area + line chart with interactive tooltips.
  */
 function initVolumeChart() {
-    const data = dashboardData.volumeData;
-    if (!data || data.length === 0) {
+    const rawData = dashboardData.volumeData;
+    if (!rawData || rawData.length === 0) {
         const svg = document.getElementById('volumeChart');
         if (svg) {
             svg.innerHTML = `<text x="400" y="140" text-anchor="middle" fill="var(--text)" opacity="0.5" font-size="14">No activity data for this period</text>`;
         }
         return;
     }
+
+    const range = dashboardData.range || 'week';
+    
+    // Aggregate year data by week to prevent visual chaos
+    const data = range === 'year' ? aggregateByWeek(rawData) : rawData;
 
     const svg = document.getElementById('volumeChart');
     const line = document.getElementById('volumeLine');
@@ -116,8 +152,9 @@ function initVolumeChart() {
     const chartW = width - padding.left - padding.right;
     const chartH = height - padding.top - padding.bottom;
 
-    const maxVal = Math.max(...data.map(d => d.total_mins), 60);
-    const yMax = Math.ceil(maxVal / 30) * 30; // Round up to nearest 30
+    // Calculate max value safely
+    const maxVal = Math.max(...data.map(d => parseInt(d.total_mins, 10) || 0), 60);
+    const yMax = Math.ceil(maxVal / 60) * 60; // Round up to nearest 60
 
     // Draw horizontal grid lines
     let gridHtml = '';
@@ -133,8 +170,10 @@ function initVolumeChart() {
     // Calculate points
     const points = data.map((d, i) => {
         const x = padding.left + (i / Math.max(data.length - 1, 1)) * chartW;
-        const y = padding.top + chartH - (d.total_mins / yMax) * chartH;
-        return { x, y, ...d };
+        // Ensure total_mins is a number for calculation
+        const mins = parseInt(d.total_mins, 10) || 0;
+        const y = padding.top + chartH - (mins / yMax) * chartH;
+        return { x, y, ...d, numericMins: mins };
     });
 
     // Build path strings
@@ -144,34 +183,32 @@ function initVolumeChart() {
     const areaD = `${pathD} L ${points[points.length - 1].x} ${padding.top + chartH} L ${points[0].x} ${padding.top + chartH} Z`;
     area.setAttribute('d', areaD);
 
-    // Draw data points with tooltips
-    points.forEach(p => {
-        const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-        circle.setAttribute('cx', p.x);
-        circle.setAttribute('cy', p.y);
-        circle.setAttribute('r', 5);
-        circle.setAttribute('class', 'data-point');
-
-        const dateObj = new Date(p.activity_date);
-        const dateLabel = dateObj.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
-
-        circle.addEventListener('mouseenter', () => {
-            tooltip.innerHTML = `<strong>${dateLabel}</strong><br>${p.session_count} session${p.session_count !== 1 ? 's' : ''}<br>${p.total_mins} mins`;
-            tooltip.classList.add('visible');
+    // Only show circles for sparse datasets (week view or < 15 points)
+    const showCircles = data.length <= 15;
+    if (showCircles) {
+        points.forEach(p => {
+            const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+            circle.setAttribute('cx', p.x);
+            circle.setAttribute('cy', p.y);
+            circle.setAttribute('r', 5);
+            circle.setAttribute('class', 'data-point');
+            const dateObj = new Date(p.activity_date);
+            const dateLabel = dateObj.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+            circle.addEventListener('mouseenter', () => {
+                tooltip.innerHTML = `<strong>${dateLabel}</strong><br>${p.session_count} session${p.session_count !== 1 ? 's' : ''}<br>${p.numericMins} mins`;
+                tooltip.classList.add('visible');
+            });
+            circle.addEventListener('mousemove', (e) => {
+                const rect = svg.getBoundingClientRect();
+                tooltip.style.left = (e.clientX - rect.left + 12) + 'px';
+                tooltip.style.top = (e.clientY - rect.top - 40) + 'px';
+            });
+            circle.addEventListener('mouseleave', () => tooltip.classList.remove('visible'));
+            pointsGroup.appendChild(circle);
         });
-        circle.addEventListener('mousemove', (e) => {
-            const rect = svg.getBoundingClientRect();
-            tooltip.style.left = (e.clientX - rect.left + 12) + 'px';
-            tooltip.style.top = (e.clientY - rect.top - 40) + 'px';
-        });
-        circle.addEventListener('mouseleave', () => {
-            tooltip.classList.remove('visible');
-        });
+    }
 
-        pointsGroup.appendChild(circle);
-    });
-
-    // X-axis labels (show every nth label to avoid crowding)
+    // X-axis labels
     const labelInterval = data.length > 14 ? Math.ceil(data.length / 7) : 1;
     let xLabelsHtml = '';
     points.forEach((p, i) => {
@@ -190,30 +227,23 @@ function initVolumeChart() {
 function initWeightSparkline() {
     const data = dashboardData.weightTrend;
     if (!data || data.length < 2) return;
-
     const svg = document.getElementById('weightChart');
     const line = document.getElementById('weightLine');
     const pointsGroup = document.getElementById('weightPoints');
     if (!svg) return;
-
     const width = 300;
     const height = 100;
     const padding = 10;
-
     const weights = data.map(d => parseFloat(d.weight_kg));
     const minVal = Math.min(...weights);
     const maxVal = Math.max(...weights);
     const range = maxVal - minVal || 1;
-
     const points = weights.map((w, i) => {
         const x = padding + (i / (weights.length - 1)) * (width - padding * 2);
         const y = height - padding - ((w - minVal) / range) * (height - padding * 2);
         return { x, y, weight: w };
     });
-
     line.setAttribute('d', `M ${points.map(p => `${p.x},${p.y}`).join(' L ')}`);
-
-    // Add points
     points.forEach(p => {
         const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
         circle.setAttribute('cx', p.x);
@@ -235,9 +265,7 @@ function initDonutRings() {
         entries.forEach(entry => {
             if (entry.isIntersecting) {
                 const el = entry.target;
-                setTimeout(() => {
-                    el.style.strokeDashoffset = el.dataset.target;
-                }, 300);
+                setTimeout(() => { el.style.strokeDashoffset = el.dataset.target; }, 300);
                 observer.unobserve(el);
             }
         });
@@ -256,9 +284,7 @@ function initProgressBars() {
     const observer = new IntersectionObserver((entries) => {
         entries.forEach(entry => {
             if (entry.isIntersecting) {
-                setTimeout(() => {
-                    entry.target.style.width = entry.target.dataset.width;
-                }, 300);
+                setTimeout(() => { entry.target.style.width = entry.target.dataset.width; }, 300);
                 observer.unobserve(entry.target);
             }
         });
