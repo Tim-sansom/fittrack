@@ -78,6 +78,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Forgot Password - FitTrack</title>
     <link rel="stylesheet" href="/css/dashboard.css">
+    <link rel="icon" type="image/svg+xml" href="/favicon.png">
+</head>
     <style>
         body { display: flex; justify-content: center; align-items: center; min-height: 100vh; background: var(--bg); }
         .auth-card { background: var(--card); padding: 2.5rem; border-radius: 16px; box-shadow: 0 4px 24px var(--shadow); width: 100%; max-width: 400px; }
