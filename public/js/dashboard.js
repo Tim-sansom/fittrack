@@ -1,35 +1,39 @@
 /**
  * File: dashboard.js
  * Location: /public/js/dashboard.js
- *
- * Purpose:
- * Handles all dashboard animations and chart rendering.
- * Implements animated counters, scroll-triggered fade-ins, bar chart growth,
- * SVG line/area chart drawing with tooltips, sparkline rendering, and
- * donut ring animations.
- *
- * Architectural Role:
- * Demonstrates advanced vanilla JS with IntersectionObserver, SVG DOM
- * manipulation, and CSS animation orchestration. No external libraries.
+ * Purpose: Handles all dashboard animations and chart rendering.
  */
 'use strict';
 
+// GLOBAL BRIDGE: This function allows the SPA shell to call these charts directly.
+window.runDashboardInits = function() {
+    // Guard clause: If we aren't on the dashboard, stop immediately.
+    if (!document.getElementById('volumeChart') && !document.querySelector('.stat-value[data-target]')) {
+        return; 
+    }
+    
+    // Wrap in try-catch so one error doesn't break the whole page
+    try { initAnimatedCounters(); } catch(e) { console.error('Counter error:', e); }
+    try { initScrollAnimations(); } catch(e) { console.error('Scroll error:', e); }
+    try { initBarChart(); } catch(e) { console.error('Bar chart error:', e); }
+    try { initVolumeChart(); } catch(e) { console.error('Volume chart error:', e); }
+    try { initWeightSparkline(); } catch(e) { console.error('Sparkline error:', e); }
+    try { initDonutRings(); } catch(e) { console.error('Donut error:', e); }
+    try { initProgressBars(); } catch(e) { console.error('Progress bar error:', e); }
+};
+
+// MPA INITIAL LOAD: This handles the very first page load (MPA mode).
 document.addEventListener('DOMContentLoaded', () => {
-    initAnimatedCounters();
-    initScrollAnimations();
-    initBarChart();
-    initVolumeChart();
-    initWeightSparkline();
-    initDonutRings();
-    initProgressBars();
+    if (typeof window.runDashboardInits === 'function') {
+        window.runDashboardInits();
+    }
 });
 
-/**
- * Animated Number Counters
- * Counts up from 0 to target value when element enters viewport.
- */
+// --- CHART FUNCTIONS ---
+
 function initAnimatedCounters() {
     const counters = document.querySelectorAll('.stat-value[data-target]');
+    if (counters.length === 0) return;
     const observer = new IntersectionObserver((entries) => {
         entries.forEach(entry => {
             if (entry.isIntersecting) {
@@ -59,11 +63,9 @@ function animateCounter(element, target) {
     }, duration / steps);
 }
 
-/**
- * Scroll-Triggered Fade-In Animations
- */
 function initScrollAnimations() {
     const elements = document.querySelectorAll('.animate-on-scroll');
+    if (elements.length === 0) return;
     const observer = new IntersectionObserver((entries) => {
         entries.forEach(entry => {
             if (entry.isIntersecting) {
@@ -75,76 +77,54 @@ function initScrollAnimations() {
     elements.forEach(el => observer.observe(el));
 }
 
-/**
- * Bar Chart Growth Animation
- */
 function initBarChart() {
     const bars = document.querySelectorAll('.bar[data-height]');
+    if (bars.length === 0) return;
     setTimeout(() => {
         bars.forEach((bar, index) => {
-            setTimeout(() => {
-                bar.style.height = bar.dataset.height;
-            }, index * 80);
+            setTimeout(() => { bar.style.height = bar.dataset.height; }, index * 80);
         });
     }, 400);
 }
 
-/**
- * Aggregate daily data by week for year view.
- * Only returns weeks with actual activity (no zero-filling) to keep the line visible.
- */
 function aggregateByWeek(dailyData) {
     const weeks = {};
-    
     dailyData.forEach(day => {
         const date = new Date(day.activity_date);
         const dayOfWeek = date.getDay() || 7; 
         date.setDate(date.getDate() - dayOfWeek + 1);
         const weekKey = date.toISOString().split('T')[0];
-
         if (!weeks[weekKey]) {
-            weeks[weekKey] = {
-                activity_date: weekKey,
-                session_count: 0,
-                total_mins: 0
-            };
+            weeks[weekKey] = { activity_date: weekKey, session_count: 0, total_mins: 0 };
         }
-        // CRITICAL FIX: Parse as Integers to prevent string concatenation
         weeks[weekKey].session_count += parseInt(day.session_count, 10) || 0;
         weeks[weekKey].total_mins += parseInt(day.total_mins, 10) || 0;
     });
-
-    // Only return weeks with activity > 0
-    return Object.values(weeks)
-        .filter(w => w.total_mins > 0)
-        .sort((a, b) => new Date(a.activity_date) - new Date(b.activity_date));
+    return Object.values(weeks).filter(w => w.total_mins > 0).sort((a, b) => new Date(a.activity_date) - new Date(b.activity_date));
 }
 
-/**
- * Main Volume Line Chart (Week/Month/Year)
- * Draws an SVG area + line chart with interactive tooltips.
- */
 function initVolumeChart() {
+    const svg = document.getElementById('volumeChart');
+    if (!svg) return; // Exit if element missing
+    
+    // CRITICAL: Check if data exists before using it
+    if (typeof dashboardData === 'undefined' || !dashboardData.volumeData) return; 
+
     const rawData = dashboardData.volumeData;
     if (!rawData || rawData.length === 0) {
-        const svg = document.getElementById('volumeChart');
-        if (svg) {
-            svg.innerHTML = `<text x="400" y="140" text-anchor="middle" fill="var(--text)" opacity="0.5" font-size="14">No activity data for this period</text>`;
-        }
+        svg.innerHTML = `<text x="400" y="140" text-anchor="middle" fill="var(--text)" opacity="0.5" font-size="14">No activity data</text>`;
         return;
     }
 
     const range = dashboardData.range || 'week';
-    
-    // Aggregate year data by week to prevent visual chaos
     const data = range === 'year' ? aggregateByWeek(rawData) : rawData;
 
-    const svg = document.getElementById('volumeChart');
     const line = document.getElementById('volumeLine');
     const area = document.getElementById('volumeArea');
     const pointsGroup = document.getElementById('volumePoints');
     const gridGroup = document.getElementById('volumeGrid');
     const tooltip = document.getElementById('volumeTooltip');
+    if (!line || !area || !pointsGroup || !gridGroup) return;
 
     const width = 800;
     const height = 280;
@@ -152,11 +132,9 @@ function initVolumeChart() {
     const chartW = width - padding.left - padding.right;
     const chartH = height - padding.top - padding.bottom;
 
-    // Calculate max value safely
     const maxVal = Math.max(...data.map(d => parseInt(d.total_mins, 10) || 0), 60);
-    const yMax = Math.ceil(maxVal / 60) * 60; // Round up to nearest 60
+    const yMax = Math.ceil(maxVal / 60) * 60;
 
-    // Draw horizontal grid lines
     let gridHtml = '';
     const gridSteps = 4;
     for (let i = 0; i <= gridSteps; i++) {
@@ -167,23 +145,18 @@ function initVolumeChart() {
     }
     gridGroup.innerHTML = gridHtml;
 
-    // Calculate points
     const points = data.map((d, i) => {
         const x = padding.left + (i / Math.max(data.length - 1, 1)) * chartW;
-        // Ensure total_mins is a number for calculation
         const mins = parseInt(d.total_mins, 10) || 0;
         const y = padding.top + chartH - (mins / yMax) * chartH;
         return { x, y, ...d, numericMins: mins };
     });
 
-    // Build path strings
     const pathD = points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ');
     line.setAttribute('d', pathD);
-
     const areaD = `${pathD} L ${points[points.length - 1].x} ${padding.top + chartH} L ${points[0].x} ${padding.top + chartH} Z`;
     area.setAttribute('d', areaD);
 
-    // Only show circles for sparse datasets (week view or < 15 points)
     const showCircles = data.length <= 15;
     if (showCircles) {
         points.forEach(p => {
@@ -208,7 +181,6 @@ function initVolumeChart() {
         });
     }
 
-    // X-axis labels
     const labelInterval = data.length > 14 ? Math.ceil(data.length / 7) : 1;
     let xLabelsHtml = '';
     points.forEach((p, i) => {
@@ -221,16 +193,18 @@ function initVolumeChart() {
     gridGroup.innerHTML += xLabelsHtml;
 }
 
-/**
- * Weight Trend Sparkline
- */
 function initWeightSparkline() {
+    const svg = document.getElementById('weightChart');
+    if (!svg) return;
+    if (typeof dashboardData === 'undefined' || !dashboardData.weightTrend) return;
+
     const data = dashboardData.weightTrend;
     if (!data || data.length < 2) return;
-    const svg = document.getElementById('weightChart');
+
     const line = document.getElementById('weightLine');
     const pointsGroup = document.getElementById('weightPoints');
-    if (!svg) return;
+    if (!line || !pointsGroup) return;
+
     const width = 300;
     const height = 100;
     const padding = 10;
@@ -256,11 +230,9 @@ function initWeightSparkline() {
     });
 }
 
-/**
- * Donut Ring Animations (calorie rings)
- */
 function initDonutRings() {
     const rings = document.querySelectorAll('.donut-intake, .donut-burn');
+    if (rings.length === 0) return;
     const observer = new IntersectionObserver((entries) => {
         entries.forEach(entry => {
             if (entry.isIntersecting) {
@@ -276,11 +248,9 @@ function initDonutRings() {
     });
 }
 
-/**
- * Progress Bar Animations (challenges)
- */
 function initProgressBars() {
     const bars = document.querySelectorAll('.progress-fill[data-width]');
+    if (bars.length === 0) return;
     const observer = new IntersectionObserver((entries) => {
         entries.forEach(entry => {
             if (entry.isIntersecting) {

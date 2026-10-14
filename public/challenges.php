@@ -2,28 +2,29 @@
 /**
  * File: challenges.php
  * Location: /public/challenges.php
- * 
+ *
  * Purpose:
- * Provides a goal-setting and tracking interface with gamification elements.
- * Features a custom Vanilla JS consistency heatmap, achievement badges,
- * tabbed challenge views, and asynchronous challenge creation.
- * 
+ * Renders the Challenges & Goals page for the Multi-Page Application (MPA).
+ * Displays a 365-day activity heatmap, tabbed challenge lists, and a modal
+ * for creating new user-defined fitness challenges.
+ *
  * Architectural Role:
- * Demonstrates advanced client-side DOM manipulation. The PHP layer only
- * handles session validation and initial data aggregation for the heatmap.
- * Challenge lists are rendered dynamically via the Fetch API.
- * 
+ * Serves as the primary view for the challenges module. It aggregates data
+ * from the `challenges` and `activity_logs` tables to provide visual feedback
+ * on user consistency and goal progression.
+ *
  * Security:
- * - All database queries are scoped to the authenticated user_id and tenant_id.
- * - Output is escaped using htmlspecialchars() to prevent XSS.
+ * - Enforces session authentication.
+ * - Scopes all database queries to the authenticated user_id and tenant_id.
+ * - Escapes output using htmlspecialchars() to prevent XSS.
  */
 declare(strict_types=1);
 
 require_once __DIR__ . '/../config/Session.php';
 require_once __DIR__ . '/../config/Database.php';
+
 Session::start();
 
-// Redirect unauthenticated users
 if (!isset($_SESSION['user_id'])) {
     header('Location: login.php');
     exit;
@@ -32,127 +33,75 @@ if (!isset($_SESSION['user_id'])) {
 $db = Database::getInstance()->getConnection();
 $userId = (int)$_SESSION['user_id'];
 $tenantId = (int)$_SESSION['tenant_id'];
-
 $pageTitle = 'Challenges';
 $currentPage = 'challenges';
 
-// Fetch Activity Data for Heatmap (Last 365 days)
-// Counts activities per day to determine intensity levels (0-4)
+/**
+ * Fetch user challenges grouped by status.
+ */
 $stmt = $db->prepare("
-    SELECT activity_date, COUNT(*) as activity_count 
+    SELECT * FROM challenges 
+    WHERE user_id = :uid AND tenant_id = :tid 
+    ORDER BY created_at DESC
+");
+$stmt->execute(['uid' => $userId, 'tid' => $tenantId]);
+$allChallenges = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+$activeChallenges = array_filter($allChallenges, fn($c) => $c['status'] === 'active');
+$completedChallenges = array_filter($allChallenges, fn($c) => $c['status'] === 'completed');
+$expiredChallenges = array_filter($allChallenges, fn($c) => $c['status'] === 'expired');
+
+/**
+ * Fetch activity logs for the last 365 days to generate the heatmap data.
+ */
+$stmt = $db->prepare("
+    SELECT activity_date, COUNT(*) as count 
     FROM activity_logs 
-    WHERE user_id = :uid AND tenant_id = :tid
+    WHERE user_id = :uid AND tenant_id = :tid 
     AND activity_date >= DATE_SUB(CURDATE(), INTERVAL 365 DAY)
     GROUP BY activity_date
 ");
 $stmt->execute(['uid' => $userId, 'tid' => $tenantId]);
-$activityData = $stmt->fetchAll(PDO::FETCH_KEY_PAIR); // Returns [date => count]
+$activityRows = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-// Streak Calculation (Simplified for demonstration)
-$currentStreak = 5; 
-$maxStreak = 14;
+$activityData = [];
+foreach ($activityRows as $row) {
+    $activityData[$row['activity_date']] = (int)$row['count'];
+}
 
 require_once __DIR__ . '/includes/header.php';
 require_once __DIR__ . '/includes/sidebar.php';
 ?>
 
-<div class="main-content">
-    <div class="challenges-header">
-        <h2>Challenges & Goals</h2>
-        <button class="btn-create" id="openChallengeModal">+ New Challenge</button>
+<main class="main-content">
+    <div class="page-header">
+        <h1>Challenges & Goals</h1>
+        <button class="btn-primary" id="openChallengeModal">+ New Challenge</button>
     </div>
 
-       <!-- Achievement Badges (Gamification) -->
-    <div class="badges-container">
-        <h3 class="section-subtitle">Achievements</h3>
-        <div class="badges-grid">
-            <div class="badge-card unlocked">
-                <div class="badge-icon">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"/></svg>
-                </div>
-                <div class="badge-info">
-                    <strong>5 Day Streak</strong>
-                    <span>Consistency Master</span>
-                </div>
-            </div>
-            <div class="badge-card unlocked">
-                <div class="badge-icon">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
-                </div>
-                <div class="badge-info">
-                    <strong>First 5K</strong>
-                    <span>Runner's High</span>
-                </div>
-            </div>
-            <div class="badge-card locked">
-                <div class="badge-icon">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/><path d="M4 22h16"/><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/><path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/><path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/></svg>
-                </div>
-                <div class="badge-info">
-                    <strong>30 Day Warrior</strong>
-                    <span>Locked: 25 days left</span>
-                </div>
-            </div>
-            <div class="badge-card locked">
-                <div class="badge-icon">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6.5 6.5h11M6.5 17.5h11M4 10v4M20 10v4M8 6v12M16 6v12"/></svg>
-                </div>
-                <div class="badge-info">
-                    <strong>Iron Lifter</strong>
-                    <span>Locked: 10 gym sessions</span>
-                </div>
-            </div>
-        </div>
+    <!-- Activity Heatmap -->
+    <div class="card" style="margin-bottom: 2rem;">
+        <h3>Activity Consistency (Last 365 Days)</h3>
+        <div id="heatmapGrid" class="heatmap-grid"></div>
     </div>
 
-    <!-- Consistency Heatmap -->
-    <div class="heatmap-container">
-        <div class="heatmap-title">Activity Consistency (Last 365 Days)</div>
-        <div class="heatmap-grid" id="heatmapGrid">
-            <!-- Generated by JS -->
-        </div>
-        <div class="heatmap-legend">
-            Less 
-            <div class="legend-box"></div>
-            <div class="legend-box level-1"></div>
-            <div class="legend-box level-2"></div>
-            <div class="legend-box level-3"></div>
-            <div class="legend-box level-4"></div> 
-            More
-        </div>
-    </div>
-
-    <!-- Streak Stats -->
-    <div class="stats-row" style="margin-bottom: 2rem;">
-        <div class="stat-card">
-            <div class="ring-text" style="position:static; transform:none; font-size:2rem; color:var(--accent);"><?= $currentStreak ?></div>
-            <div>Current Streak (Days)</div>
-        </div>
-        <div class="stat-card">
-            <div class="ring-text" style="position:static; transform:none; font-size:2rem; color:var(--highlight);"><?= $maxStreak ?></div>
-            <div>Longest Streak (Days)</div>
-        </div>
-        <div class="stat-card">
-            <div class="ring-text" style="position:static; transform:none; font-size:2rem; color:var(--success);" id="activeGoalCount">-</div>
-            <div>Active Goals</div>
-        </div>
-    </div>
-
-    <!-- Tabbed Challenge Interface -->
+    <!-- Challenge Tabs -->
     <div class="tabs-container">
         <div class="tabs">
-            <button class="tab-btn active" data-status="active">Active Challenges</button>
+            <button class="tab-btn active" data-status="active">Active (<span id="activeGoalCount"><?= count($activeChallenges) ?></span>)</button>
             <button class="tab-btn" data-status="completed">Completed</button>
-        </div>
-        <div id="challengeList" class="challenge-grid">
-            <!-- Populated by JS -->
-            <div class="empty-state">Loading challenges...</div>
+            <button class="tab-btn" data-status="expired">Expired</button>
         </div>
     </div>
-</div>
+
+    <!-- Challenge List Container -->
+    <div id="challengeList" class="challenge-grid">
+        <!-- Populated dynamically by challenges.js -->
+    </div>
+</main>
 
 <!-- Create Challenge Modal -->
-<div class="modal-overlay" id="challengeModal">
+<div class="modal-overlay" id="challengeModal" style="display: none;">
     <div class="modal-content">
         <div class="modal-header">
             <h3>Create New Challenge</h3>
@@ -160,16 +109,16 @@ require_once __DIR__ . '/includes/sidebar.php';
         </div>
         <form id="challengeForm">
             <div class="form-group">
-                <label>Challenge Title</label>
-                <input type="text" name="title" required placeholder="e.g. Run 100km this month">
+                <label for="challengeTitle">Challenge Title</label>
+                <input type="text" id="challengeTitle" name="title" required placeholder="e.g. Run 100km this month">
             </div>
             <div class="form-group">
-                <label>Target Value</label>
-                <input type="number" name="target_value" step="0.1" required>
+                <label for="targetValue">Target Value</label>
+                <input type="number" id="targetValue" name="target_value" step="0.1" required>
             </div>
             <div class="form-group">
-                <label>Unit</label>
-                <select name="unit">
+                <label for="unit">Unit</label>
+                <select id="unit" name="unit">
                     <option value="km">Kilometres</option>
                     <option value="sessions">Sessions</option>
                     <option value="kcal">Calories</option>
@@ -177,18 +126,18 @@ require_once __DIR__ . '/includes/sidebar.php';
                 </select>
             </div>
             <div class="form-group">
-                <label>Duration (Days)</label>
-                <input type="number" name="duration" value="30" required>
+                <label for="duration">Duration (Days)</label>
+                <input type="number" id="duration" name="duration" value="30" required>
             </div>
             <button type="submit" class="btn-primary">Create Challenge</button>
         </form>
     </div>
 </div>
 
+<?php require_once __DIR__ . '/includes/footer.php'; ?>
+
+<!-- Inject heatmap data for JS consumption -->
 <script>
-    // Pass PHP data to JS
     const activityData = <?= json_encode($activityData) ?>;
 </script>
-<script src="/js/challenges.js"></script>
-
-<?php require_once __DIR__ . '/includes/footer.php'; ?>
+<script src="js/challenges.js"></script>

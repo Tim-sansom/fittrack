@@ -17,5 +17,6 @@ declare(strict_types=1);
 </div>
 
 <script src="/js/main.js"></script>
+<script src="/js/avatar-cropper.js"></script>
 </body>
 </html>

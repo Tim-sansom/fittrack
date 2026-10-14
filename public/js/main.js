@@ -1,12 +1,11 @@
 /**
  * File: main.js
  * Location: /public/js/main.js
- *
  * Purpose:
  * Handles global client-side UI interactions. Manages the dark/light/system
  * theme toggle, sidebar collapse state, mobile navigation drawer, header
- * dropdowns (Notifications and Calendar), and the live header clock.
- *
+ * dropdowns (Notifications and Calendar), the live header clock, and the
+ * SPA/MPA architecture toggle.
  * Architectural Role:
  * Acts as the presentation layer's interaction controller. Keeps generic
  * UI behaviours in a single file to maintain a clean separation of concerns
@@ -23,20 +22,14 @@
 (function initThemeToggle() {
     const themeToggleBtn = document.getElementById('themeToggle');
     if (!themeToggleBtn) return;
-
     const rootElement = document.documentElement;
 
-    /**
-     * Applies the given theme to the document root.
-     * @param {string} theme - 'light', 'dark', or 'system'
-     */
     function applyTheme(theme) {
         if (theme === 'dark') {
             rootElement.setAttribute('data-theme', 'dark');
         } else if (theme === 'light') {
             rootElement.removeAttribute('data-theme');
         } else {
-            // System mode: remove explicit attribute, then check OS preference
             rootElement.removeAttribute('data-theme');
             const systemPrefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
             if (systemPrefersDark) {
@@ -46,18 +39,15 @@
         localStorage.setItem('theme', theme);
     }
 
-    // Apply initial theme on load
     const savedTheme = localStorage.getItem('theme') || 'system';
     applyTheme(savedTheme);
 
-    // Listen for OS-level theme changes if user is in 'system' mode
     window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (e) => {
         if (localStorage.getItem('theme') === 'system') {
             applyTheme('system');
         }
     });
 
-    // Header toggle button: overrides system preference with explicit light/dark
     themeToggleBtn.addEventListener('click', () => {
         const isCurrentlyDark = rootElement.getAttribute('data-theme') === 'dark';
         const newTheme = isCurrentlyDark ? 'light' : 'dark';
@@ -72,10 +62,8 @@
 (function initSidebarToggle() {
     const sidebar = document.getElementById('sidebar');
     const toggleBtn = document.getElementById('sidebarToggle');
-
     if (!sidebar || !toggleBtn) return;
 
-    // Restore saved state
     const isCollapsed = localStorage.getItem('sidebarCollapsed') === 'true';
     if (isCollapsed) {
         sidebar.classList.add('collapsed');
@@ -95,15 +83,13 @@
 (function initMobileSidebar() {
     const toggleBtn = document.getElementById('mobileSidebarToggle');
     const sidebar = document.querySelector('.sidebar');
-
     if (!toggleBtn || !sidebar) return;
 
     toggleBtn.addEventListener('click', (e) => {
-        e.stopPropagation(); // Prevent immediate closing
+        e.stopPropagation();
         sidebar.classList.toggle('mobile-open');
     });
 
-    // Close sidebar when clicking outside of it on mobile
     document.addEventListener('click', (e) => {
         if (window.innerWidth <= 768 &&
             !sidebar.contains(e.target) &&
@@ -122,33 +108,25 @@
 (function initHeaderDropdowns() {
     const triggers = document.querySelectorAll('.dropdown-trigger');
     const menus = document.querySelectorAll('.dropdown-menu');
-
     if (!triggers.length || !menus.length) return;
 
-    // Toggle dropdown on button click
     triggers.forEach(trigger => {
         trigger.addEventListener('click', (e) => {
-            e.stopPropagation(); // Prevent document click from immediately closing it
+            e.stopPropagation();
             const targetMenu = trigger.closest('.dropdown-container').querySelector('.dropdown-menu');
-
-            // Close all other menus first
             menus.forEach(menu => {
                 if (menu !== targetMenu) menu.classList.remove('active');
             });
-
-            // Toggle current menu
             targetMenu.classList.toggle('active');
         });
     });
 
-    // Close dropdowns when clicking outside
     document.addEventListener('click', (e) => {
         if (!e.target.closest('.dropdown-container')) {
             menus.forEach(menu => menu.classList.remove('active'));
         }
     });
 
-    // Close dropdowns on Escape key
     document.addEventListener('keydown', (e) => {
         if (e.key === 'Escape') {
             menus.forEach(menu => menu.classList.remove('active'));
@@ -166,7 +144,6 @@
 
     function updateClock() {
         const now = new Date();
-        // Format: "Sat, 3 Oct, 14:30"
         const options = {
             weekday: 'short',
             day: 'numeric',
@@ -179,4 +156,79 @@
 
     updateClock();
     setInterval(updateClock, 1000);
+})();
+
+/**
+ * SPA/MPA Architecture Toggle
+ * Persists user preference in localStorage and routes between the 
+ * Multi-Page Application and the Single-Page Application shell,
+ * maintaining the current page context across the switch.
+ */
+(function initSpaMpaToggle() {
+    const toggle = document.getElementById('spaModeToggle');
+    const mpaLabel = document.getElementById('mpaLabel');
+    const spaLabel = document.getElementById('spaLabel');
+
+    if (!toggle) return;
+
+    // 1. Load saved preference on page load
+    const isSpaMode = localStorage.getItem('fittrack_spa_mode') === 'true';
+    toggle.checked = isSpaMode;
+    
+    if (mpaLabel) mpaLabel.classList.toggle('active', !isSpaMode);
+    if (spaLabel) spaLabel.classList.toggle('active', isSpaMode);
+
+    // 2. Handle Toggle Click
+    toggle.addEventListener('change', (e) => {
+        const enabled = e.target.checked;
+        localStorage.setItem('fittrack_spa_mode', enabled);
+
+        if (mpaLabel) mpaLabel.classList.toggle('active', !enabled);
+        if (spaLabel) spaLabel.classList.toggle('active', enabled);
+
+        // 3. Smart Routing: Maintain current page context
+        let currentPage = 'dashboard'; // Default fallback
+
+        if (enabled) {
+            // Switching MPA -> SPA
+            const path = window.location.pathname;
+            // Handle both /workouts.php and /spa/index.php paths
+            const spaMatch = path.match(/\/spa\/index\.php$/);
+            const mpaMatch = path.match(/\/([a-z]+)\.php$/);
+            
+            if (mpaMatch && mpaMatch[1] && !spaMatch) {
+                currentPage = mpaMatch[1];
+            } else if (spaMatch) {
+                // If already in SPA path, try to get hash
+                const hash = window.location.hash.replace('#', '');
+                if (hash) currentPage = hash;
+            }
+            
+            // Also check hash as fallback
+            const hash = window.location.hash.replace('#', '');
+            if (hash && hash !== 'index') currentPage = hash;
+            
+            // Last resort: check localStorage
+            const savedRoute = localStorage.getItem('fittrack_current_route');
+            if (savedRoute) currentPage = savedRoute;
+
+            console.log('MPA->SPA redirecting to:', currentPage);
+            window.location.href = '../spa/index.php#' + currentPage;
+        } else {
+            // Switching SPA -> MPA
+            const hash = window.location.hash.replace('#', '');
+            if (hash && hash !== 'index') {
+                currentPage = hash;
+            }
+            
+            // Fallback to localStorage
+            const savedRoute = localStorage.getItem('fittrack_current_route');
+            if (savedRoute && savedRoute !== 'index') {
+                currentPage = savedRoute;
+            }
+
+            console.log('SPA->MPA redirecting to:', currentPage);
+            window.location.href = '../' + currentPage + '.php';
+        }
+    });
 })();
