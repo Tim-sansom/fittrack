@@ -27,6 +27,14 @@ if ($userId > 0) {
     try {
         require_once __DIR__ . '/../../config/Database.php';
         $db = Database::getInstance()->getConnection();
+        
+        // =====================================================================
+        // LAZY SEED HOOK
+        // Triggers the application-level cron for the demo account to ensure
+        // 90 days of historical data is always present for the marker.
+        // =====================================================================
+        require_once __DIR__ . '/lazy_seed.php';
+
         $stmt = $db->prepare("SELECT avatar_path FROM users WHERE user_id = :id");
         $stmt->execute(['id' => $userId]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);

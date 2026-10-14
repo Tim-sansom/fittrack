@@ -524,3 +524,8 @@ WHERE r.role_key = 'super_administrator';
 INSERT INTO tenants (tenant_name, tenant_slug) VALUES
 ('North Yorkshire Fitness', 'north-yorkshire-fitness'),
 ('West Yorkshire Fitness', 'west-yorkshire-fitness');
+
+ALTER TABLE daily_nutrition
+ADD COLUMN protein_g INT UNSIGNED NULL DEFAULT 0,
+ADD COLUMN carbs_g INT UNSIGNED NULL DEFAULT 0,
+ADD COLUMN fats_g INT UNSIGNED NULL DEFAULT 0;
