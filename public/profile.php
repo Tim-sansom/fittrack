@@ -21,12 +21,10 @@ declare(strict_types=1);
 require_once __DIR__ . '/../config/Session.php';
 require_once __DIR__ . '/../config/Database.php';
 Session::start();
-
 if (!isset($_SESSION['user_id'])) {
     header('Location: login.php');
     exit;
 }
-
 $db = Database::getInstance()->getConnection();
 $userId = (int)$_SESSION['user_id'];
 $tenantId = (int)$_SESSION['tenant_id'];
@@ -85,11 +83,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_avatar'])) {
         die('Invalid CSRF token');
     }
     if (isset($_FILES['avatar']) && $_FILES['avatar']['error'] === UPLOAD_ERR_OK) {
-        // The JS cropper sends a compressed JPEG, so we check for that.
         $fileExt = strtolower(pathinfo($_FILES['avatar']['name'], PATHINFO_EXTENSION));
         $allowedExts = ['jpg', 'jpeg', 'png', 'webp'];
-        
-        // Size limit increased slightly, but the JS compresses it to ~50kb anyway.
         if (in_array($fileExt, $allowedExts) && $_FILES['avatar']['size'] <= 5 * 1024 * 1024) {
             $uploadDir = __DIR__ . '/uploads/avatars/';
             if (!is_dir($uploadDir)) {
@@ -97,7 +92,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_avatar'])) {
             }
             $newFileName = 'user_' . $userId . '_' . time() . '.' . $fileExt;
             $uploadPath = $uploadDir . $newFileName;
-            
             if (move_uploaded_file($_FILES['avatar']['tmp_name'], $uploadPath)) {
                 if ($avatarPath && file_exists(__DIR__ . $avatarPath)) {
                     @unlink(__DIR__ . $avatarPath);
@@ -123,14 +117,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_profile'])) {
     $newAge = $_POST['age_band'] ?? '25-34';
     $newGender = $_POST['gender_identity'] ?? 'prefer_not_to_say';
     $newLocality = trim($_POST['locality'] ?? '');
-
     $stmt = $db->prepare("UPDATE users SET display_name = :name, bio = :bio WHERE user_id = :id");
     $stmt->execute(['name' => $newName, 'bio' => $newBio, 'id' => $userId]);
-
     $checkStmt = $db->prepare("SELECT user_id FROM user_profiles WHERE user_id = :uid_check");
     $checkStmt->execute(['uid_check' => $userId]);
     $profileExists = $checkStmt->fetch();
-
     if ($profileExists) {
         $stmt = $db->prepare("UPDATE user_profiles SET age_band = :age, gender_identity = :gender, locality = :locality WHERE user_id = :uid_upd");
         $stmt->execute(['age' => $newAge, 'gender' => $newGender, 'locality' => $newLocality, 'uid_upd' => $userId]);
@@ -153,7 +144,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_measurements']
     $h = (float)($_POST['height_cm'] ?? 0);
     $w = (float)($_POST['weight_kg'] ?? 0);
     $bmi = $h > 0 ? round($w / pow($h / 100, 2), 1) : 0;
-    
     $stmt = $db->prepare("
         INSERT INTO user_measurements
         (user_id, height_cm, weight_kg, chest_cm, waist_cm, hips_cm,
@@ -191,10 +181,8 @@ require_once __DIR__ . '/includes/sidebar.php';
                     </div>
                 <?php endif; ?>
             </div>
-            
-            <!-- NEW: Vanilla JS Cropper Trigger -->
-            <button type="button" id="upload-trigger-btn" class="btn-upload-avatar" title="Change avatar">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
+            <button type="button" id="upload-trigger-btn" class="btn-upload-avatar" title="Change avatar" aria-label="Change profile photo">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16" aria-hidden="true">
                     <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
                     <polyline points="17 8 12 3 7 8"></polyline>
                     <line x1="12" y1="3" x2="12" y2="15"></line>
@@ -202,26 +190,19 @@ require_once __DIR__ . '/includes/sidebar.php';
                 Change Photo
             </button>
             <input type="file" id="avatar-file-input" accept="image/jpeg, image/png, image/webp" hidden>
-
-            <!-- NEW: The Cropper Modal -->
             <div id="avatar-crop-modal" class="modal-overlay" style="display: none;">
                 <div class="modal-content" style="background: var(--card); padding: 2rem; border-radius: 12px; max-width: 500px; width: 90%; box-shadow: 0 10px 25px rgba(0,0,0,0.5);">
                     <h3 style="margin-top: 0; color: var(--text);">Adjust Profile Photo</h3>
                     <p style="font-size: 0.9rem; opacity: 0.8; margin-bottom: 1rem;">Zoom and pan to position your photo. It will be automatically compressed.</p>
-                    
                     <div style="width: 300px; height: 300px; margin: 0 auto 1rem auto; border-radius: 50%; overflow: hidden; border: 2px solid var(--accent); background: #000;">
                         <canvas id="crop-preview-canvas" width="300" height="300" style="width: 100%; height: 100%;"></canvas>
                     </div>
-
                     <div class="crop-controls" style="display: flex; flex-direction: column; gap: 1rem; margin-bottom: 1.5rem;">
                         <label style="color: var(--text); font-size: 0.9rem;">Zoom: <input type="range" id="crop-zoom" min="0.1" max="3" step="0.05" value="1" style="width: 100%;"></label>
                         <label style="color: var(--text); font-size: 0.9rem;">Horizontal: <input type="range" id="crop-pan-x" min="-300" max="300" value="0" style="width: 100%;"></label>
                         <label style="color: var(--text); font-size: 0.9rem;">Vertical: <input type="range" id="crop-pan-y" min="-300" max="300" value="0" style="width: 100%;"></label>
                     </div>
-
-                    <!-- Hidden input to pass CSRF token to JS -->
                     <input type="hidden" id="csrf-token-input" value="<?= htmlspecialchars($_SESSION['csrf_token'] ?? '') ?>">
-
                     <div style="display: flex; justify-content: flex-end; gap: 1rem;">
                         <button type="button" id="cancel-crop-btn" class="btn-secondary">Cancel</button>
                         <button type="button" id="save-crop-btn" class="btn-primary">Apply & Upload</button>
@@ -239,14 +220,12 @@ require_once __DIR__ . '/includes/sidebar.php';
             <?php endif; ?>
         </div>
     </div>
-
     <?php if (isset($_GET['saved'])): ?>
         <div class="alert-success">Profile updated successfully.</div>
     <?php endif; ?>
     <?php if (isset($_GET['measurements'])): ?>
         <div class="alert-success">Measurements recorded.</div>
     <?php endif; ?>
-
     <div class="profile-grid">
         <!-- Personal Information -->
         <div class="card">
@@ -289,7 +268,6 @@ require_once __DIR__ . '/includes/sidebar.php';
                 <button type="submit" class="btn-primary btn-save">Save Profile</button>
             </form>
         </div>
-
         <!-- Body Measurements -->
         <div class="card">
             <h3>Body Measurements</h3>
@@ -299,40 +277,40 @@ require_once __DIR__ . '/includes/sidebar.php';
                 <input type="hidden" name="update_measurements" value="1">
                 <div class="form-grid-3">
                     <div class="form-group">
-                        <label>Height (cm)</label>
-                        <input type="number" step="0.1" name="height_cm" value="<?= $measurements['height_cm'] ?>" placeholder="175">
+                        <label for="height_cm">Height (cm)</label>
+                        <input type="number" step="0.1" id="height_cm" name="height_cm" value="<?= $measurements['height_cm'] ?>" placeholder="175">
                     </div>
                     <div class="form-group">
-                        <label>Weight (kg)</label>
-                        <input type="number" step="0.1" name="weight_kg" value="<?= $measurements['weight_kg'] ?>" placeholder="70">
+                        <label for="weight_kg">Weight (kg)</label>
+                        <input type="number" step="0.1" id="weight_kg" name="weight_kg" value="<?= $measurements['weight_kg'] ?>" placeholder="70">
                     </div>
                     <div class="form-group">
-                        <label>Chest (cm)</label>
-                        <input type="number" step="0.1" name="chest_cm" value="<?= $measurements['chest_cm'] ?>">
+                        <label for="chest_cm">Chest (cm)</label>
+                        <input type="number" step="0.1" id="chest_cm" name="chest_cm" value="<?= $measurements['chest_cm'] ?>">
                     </div>
                     <div class="form-group">
-                        <label>Waist (cm)</label>
-                        <input type="number" step="0.1" name="waist_cm" value="<?= $measurements['waist_cm'] ?>">
+                        <label for="waist_cm">Waist (cm)</label>
+                        <input type="number" step="0.1" id="waist_cm" name="waist_cm" value="<?= $measurements['waist_cm'] ?>">
                     </div>
                     <div class="form-group">
-                        <label>Hips (cm)</label>
-                        <input type="number" step="0.1" name="hips_cm" value="<?= $measurements['hips_cm'] ?>">
+                        <label for="hips_cm">Hips (cm)</label>
+                        <input type="number" step="0.1" id="hips_cm" name="hips_cm" value="<?= $measurements['hips_cm'] ?>">
                     </div>
                     <div class="form-group">
-                        <label>Left Arm (cm)</label>
-                        <input type="number" step="0.1" name="left_arm_cm" value="<?= $measurements['left_arm_cm'] ?>">
+                        <label for="left_arm_cm">Left Arm (cm)</label>
+                        <input type="number" step="0.1" id="left_arm_cm" name="left_arm_cm" value="<?= $measurements['left_arm_cm'] ?>">
                     </div>
                     <div class="form-group">
-                        <label>Right Arm (cm)</label>
-                        <input type="number" step="0.1" name="right_arm_cm" value="<?= $measurements['right_arm_cm'] ?>">
+                        <label for="right_arm_cm">Right Arm (cm)</label>
+                        <input type="number" step="0.1" id="right_arm_cm" name="right_arm_cm" value="<?= $measurements['right_arm_cm'] ?>">
                     </div>
                     <div class="form-group">
-                        <label>Left Leg (cm)</label>
-                        <input type="number" step="0.1" name="left_leg_cm" value="<?= $measurements['left_leg_cm'] ?>">
+                        <label for="left_leg_cm">Left Leg (cm)</label>
+                        <input type="number" step="0.1" id="left_leg_cm" name="left_leg_cm" value="<?= $measurements['left_leg_cm'] ?>">
                     </div>
                     <div class="form-group">
-                        <label>Right Leg (cm)</label>
-                        <input type="number" step="0.1" name="right_leg_cm" value="<?= $measurements['right_leg_cm'] ?>">
+                        <label for="right_leg_cm">Right Leg (cm)</label>
+                        <input type="number" step="0.1" id="right_leg_cm" name="right_leg_cm" value="<?= $measurements['right_leg_cm'] ?>">
                     </div>
                 </div>
                 <button type="submit" class="btn-primary btn-save">Record Measurements</button>
@@ -340,7 +318,6 @@ require_once __DIR__ . '/includes/sidebar.php';
         </div>
     </div>
 </div>
-
 <!-- Vanilla JS Avatar Cropper & Compressor -->
 <script>
 document.addEventListener('DOMContentLoaded', () => {
@@ -355,11 +332,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const panXSlider = document.getElementById('crop-pan-x');
     const panYSlider = document.getElementById('crop-pan-y');
     const csrfToken = document.getElementById('csrf-token-input').value;
-
     let originalImage = null;
-
     if (triggerBtn) triggerBtn.addEventListener('click', () => fileInput.click());
-
     if (fileInput) {
         fileInput.addEventListener('change', (e) => {
             const file = e.target.files[0];
@@ -381,9 +355,7 @@ document.addEventListener('DOMContentLoaded', () => {
             reader.readAsDataURL(file);
         });
     }
-
     [zoomSlider, panXSlider, panYSlider].forEach(slider => slider.addEventListener('input', drawCanvas));
-
     function drawCanvas() {
         if (!originalImage) return;
         const width = canvas.width; const height = canvas.height;
@@ -394,21 +366,19 @@ document.addEventListener('DOMContentLoaded', () => {
         ctx.fillStyle = '#000'; ctx.fillRect(0, 0, width, height);
         const imgRatio = originalImage.width / originalImage.height;
         let drawWidth, drawHeight;
-        if (imgRatio > 1) { drawHeight = height; drawWidth = height * imgRatio; } 
+        if (imgRatio > 1) { drawHeight = height; drawWidth = height * imgRatio; }
         else { drawWidth = width; drawHeight = width / imgRatio; }
         drawWidth *= zoom; drawHeight *= zoom;
         const x = (width - drawWidth) / 2 + panX;
         const y = (height - drawHeight) / 2 + panY;
         ctx.drawImage(originalImage, x, y, drawWidth, drawHeight);
     }
-
     if (cancelBtn) {
         cancelBtn.addEventListener('click', () => {
             modal.style.display = 'none';
             fileInput.value = '';
         });
     }
-
     if (saveBtn) {
         saveBtn.addEventListener('click', () => {
             if (!originalImage) return;
@@ -418,12 +388,10 @@ document.addEventListener('DOMContentLoaded', () => {
             const outputCtx = outputCanvas.getContext('2d');
             const scaleFactor = outputSize / canvas.width;
             outputCtx.fillStyle = '#000'; outputCtx.fillRect(0, 0, outputSize, outputSize);
-            
             const imgRatio = originalImage.width / originalImage.height;
             let drawWidth, drawHeight;
-            if (imgRatio > 1) { drawHeight = outputSize; drawWidth = outputSize * imgRatio; } 
+            if (imgRatio > 1) { drawHeight = outputSize; drawWidth = outputSize * imgRatio; }
             else { drawWidth = outputSize; drawHeight = outputSize / imgRatio; }
-            
             const zoom = parseFloat(zoomSlider.value);
             const panX = parseFloat(panXSlider.value) * scaleFactor;
             const panY = parseFloat(panYSlider.value) * scaleFactor;
@@ -431,17 +399,14 @@ document.addEventListener('DOMContentLoaded', () => {
             const x = (outputSize - drawWidth) / 2 + panX;
             const y = (outputSize - drawHeight) / 2 + panY;
             outputCtx.drawImage(originalImage, x, y, drawWidth, drawHeight);
-
             outputCanvas.toBlob((blob) => {
                 if (blob) {
                     const formData = new FormData();
                     formData.append('avatar', blob, 'avatar.jpg');
                     formData.append('update_avatar', '1');
                     formData.append('csrf_token', csrfToken);
-
                     saveBtn.textContent = 'Uploading...';
                     saveBtn.disabled = true;
-
                     fetch('profile.php', { method: 'POST', body: formData })
                     .then(response => {
                         if (response.ok) window.location.reload();
@@ -458,5 +423,4 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 });
 </script>
-
 <?php require_once __DIR__ . '/includes/footer.php'; ?>

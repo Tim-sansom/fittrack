@@ -7,15 +7,6 @@
  * Returns the user's body measurement records and activity volume data
  * for the SPA Progress view. Provides both the latest measurement (for
  * stat cards with deltas) and historical records (for trend charts).
- *
- * Architectural Role:
- * Decouples the measurement data layer from the MPA page renderer,
- * allowing the SPA to consume the same data via JSON. The API aggregates
- * data from user_measurements and activity_logs tables.
- *
- * Security:
- * - Enforces session authentication.
- * - Scopes all queries to the authenticated user_id and tenant_id.
  */
 declare(strict_types=1);
 

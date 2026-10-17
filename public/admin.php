@@ -2,158 +2,220 @@
 /**
  * File: admin.php
  * Location: /public/admin.php
- * 
+ *
  * Purpose:
- * Administrative interface for managing the activity_types catalogue.
- * 
+ * Administrative interface for managing tenant-specific content and users.
+ *
  * Security:
- * - Enforces Role-Based Access Control (RBAC). Only 'administrator' 
- *   or 'super_administrator' roles can access this page.
- * - Validates CSRF tokens on all POST requests.
+ * - Enforces Role-Based Access Control (RBAC).
+ * - Prevents admins from modifying their own accounts (anti-lockout).
  * - Scopes all database writes to the authenticated tenant_id.
  */
 declare(strict_types=1);
-
-require_once __DIR__ . '/config/Session.php';
-require_once __DIR__ . '/config/Database.php';
-
+require_once __DIR__ . '/../config/Session.php';
+require_once __DIR__ . '/../config/Database.php';
 Session::start();
-
-// RBAC Check: Redirect non-admins to the dashboard
+// RBAC Check
 if (!isset($_SESSION['user_id']) || !in_array($_SESSION['role'] ?? '', ['administrator', 'super_administrator'], true)) {
     header('Location: dashboard.php');
     exit;
 }
-
 $db = Database::getInstance()->getConnection();
 $tenantId = (int)$_SESSION['tenant_id'];
+$adminUserId = (int)$_SESSION['user_id'];
+$pageTitle = 'Admin';
+$currentPage = 'admin';
 $message = '';
 $messageType = '';
-
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    // CSRF Validation
     if (!hash_equals($_SESSION['csrf_token'] ?? '', $_POST['csrf_token'] ?? '')) {
         die('Invalid CSRF token');
     }
-
-    if (isset($_POST['action'])) {
-        if ($_POST['action'] === 'add') {
-            $name = trim($_POST['name'] ?? '');
-            // Generate URL-friendly slug from name
-            $slug = strtolower(preg_replace('/[^a-z0-9]+/i', '-', $name));
-            $category = $_POST['category'] ?? 'general';
-            $measurement_model = $_POST['measurement_model'] ?? 'general';
-            $default_unit = $_POST['default_unit'] ?? 'none';
-            $description = trim($_POST['description'] ?? '');
-            $safety_notes = trim($_POST['safety_notes'] ?? '');
-
-            if ($name && $slug) {
-                try {
-                    $stmt = $db->prepare("
-                        INSERT INTO activity_types 
-                        (tenant_id, name, slug, category, measurement_model, default_unit, description, safety_notes, is_published, created_by_user_id)
-                        VALUES (:tid, :name, :slug, :cat, :model, :unit, :desc, :safety, 1, :uid)
-                    ");
-                    $stmt->execute([
-                        'tid' => $tenantId, 'name' => $name, 'slug' => $slug,
-                        'cat' => $category, 'model' => $measurement_model, 'unit' => $default_unit,
-                        'desc' => $description, 'safety' => $safety_notes, 'uid' => $_SESSION['user_id']
-                    ]);
-                    $message = 'Activity type added successfully.';
-                    $messageType = 'success';
-                } catch (PDOException $e) {
-                    $message = 'Error: ' . $e->getMessage();
-                    $messageType = 'error';
-                }
+    $action = $_POST['action'] ?? '';
+    // --- ACTIVITY TYPE MANAGEMENT ---
+    if ($action === 'add_activity') {
+        $name = trim($_POST['name'] ?? '');
+        $slug = strtolower(preg_replace('/[^a-z0-9]+/i', '-', $name));
+        $stmt = $db->prepare("INSERT INTO activity_types (tenant_id, name, slug, category, is_published, created_by_user_id) VALUES (:tid, :name, :slug, 'general', 1, :uid)");
+        $stmt->execute(['tid' => $tenantId, 'name' => $name, 'slug' => $slug, 'uid' => $adminUserId]);
+        $message = 'Activity type added.'; $messageType = 'success';
+    } elseif ($action === 'delete_activity') {
+        $stmt = $db->prepare("DELETE FROM activity_types WHERE activity_type_id = :id AND tenant_id = :tid");
+        $stmt->execute(['id' => (int)$_POST['activity_type_id'], 'tid' => $tenantId]);
+        $message = 'Activity type deleted.'; $messageType = 'success';
+    }
+    // --- USER MANAGEMENT ---
+    elseif ($action === 'add_user') {
+        $username = trim($_POST['username'] ?? '');
+        $email = trim($_POST['email'] ?? '');
+        $displayName = trim($_POST['display_name'] ?? '');
+        $password = $_POST['password'] ?? '';
+        $roleId = (int)$_POST['role_id'];
+        if ($username && $email && $password && strlen($password) >= 8) {
+            try {
+                $db->beginTransaction();
+                // 1. Create User
+                $hash = password_hash($password, PASSWORD_BCRYPT, ['cost' => 12]);
+                $stmt = $db->prepare("INSERT INTO users (username, email, password_hash, display_name, account_status) VALUES (:u, :e, :h, :d, 'active')");
+                $stmt->execute(['u' => $username, 'e' => $email, 'h' => $hash, 'd' => $displayName]);
+                $newUserId = (int)$db->lastInsertId();
+                // 2. Assign to Tenant
+                $stmt = $db->prepare("INSERT INTO tenant_memberships (tenant_id, user_id, role_id, membership_status) VALUES (:tid, :uid, :rid, 'active')");
+                $stmt->execute(['tid' => $tenantId, 'uid' => $newUserId, 'rid' => $roleId]);
+                $db->commit();
+                $message = "User $displayName added successfully."; $messageType = 'success';
+            } catch (PDOException $e) {
+                $db->rollBack();
+                $message = 'Error: Username or email may already exist.'; $messageType = 'error';
             }
-        } elseif ($_POST['action'] === 'delete') {
-            $typeId = (int)($_POST['activity_type_id'] ?? 0);
-            if ($typeId) {
-                // Scope deletion to tenant to prevent cross-tenant data removal
-                $stmt = $db->prepare("DELETE FROM activity_types WHERE activity_type_id = :id AND tenant_id = :tid");
-                $stmt->execute(['id' => $typeId, 'tid' => $tenantId]);
-                $message = 'Activity type deleted.';
-                $messageType = 'success';
-            }
+        } else {
+            $message = 'Invalid input. Password must be at least 8 characters.'; $messageType = 'error';
+        }
+    }
+    elseif (in_array($action, ['suspend_user', 'remove_user'])) {
+        $targetUserId = (int)$_POST['user_id'];
+        // Security: Prevent self-modification
+        if ($targetUserId === $adminUserId) {
+            $message = 'You cannot modify your own account.'; $messageType = 'error';
+        } else {
+            $newStatus = ($action === 'suspend_user') ? 'suspended' : 'removed';
+            $stmt = $db->prepare("UPDATE tenant_memberships SET membership_status = :status WHERE user_id = :uid AND tenant_id = :tid");
+            $stmt->execute(['status' => $newStatus, 'uid' => $targetUserId, 'tid' => $tenantId]);
+            $msg = ($action === 'suspend_user') ? 'User suspended (banned).' : 'User removed from tenant.';
+            $message = $msg; $messageType = 'success';
         }
     }
 }
-
-// Fetch tenant-specific activity types
-$stmt = $db->prepare("SELECT * FROM activity_types WHERE tenant_id = :tid ORDER BY name");
-$stmt->execute(['tid' => $tenantId]);
-$activityTypes = $stmt->fetchAll(PDO::FETCH_ASSOC);
+// Fetch Data
+$activityTypes = $db->prepare("SELECT * FROM activity_types WHERE tenant_id = :tid ORDER BY name");
+$activityTypes->execute(['tid' => $tenantId]);
+$types = $activityTypes->fetchAll(PDO::FETCH_ASSOC);
+$roles = $db->query("SELECT role_id, role_key FROM roles WHERE role_key != 'super_administrator'")->fetchAll(PDO::FETCH_ASSOC);
+$users = $db->prepare("
+    SELECT u.user_id, u.username, u.email, u.display_name, u.account_status,
+    tm.membership_status, r.role_key
+    FROM tenant_memberships tm
+    JOIN users u ON tm.user_id = u.user_id
+    JOIN roles r ON tm.role_id = r.role_id
+    WHERE tm.tenant_id = :tid
+    ORDER BY u.display_name ASC
+");
+$users->execute(['tid' => $tenantId]);
+$userList = $users->fetchAll(PDO::FETCH_ASSOC);
+require_once __DIR__ . '/includes/header.php';
+require_once __DIR__ . '/includes/sidebar.php';
 ?>
-<!DOCTYPE html>
-<html lang="en-GB">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Admin | FitTrack</title>
-    <link rel="stylesheet" href="/css/dashboard.css">
-    <style>
-        /* Admin-specific styles */
-        .nav-links { display: flex; gap: 1rem; }
-        .nav-links a { text-decoration: none; color: var(--accent); font-weight: 500; }
-        .container { max-width: 1000px; margin: 0 auto; }
-        .message { padding: 1rem; border-radius: 8px; margin-bottom: 1rem; }
-        .message.success { background: rgba(76, 175, 80, 0.1); color: var(--success); }
-        .message.error { background: rgba(226, 105, 114, 0.1); color: var(--alert); }
-        textarea { resize: vertical; min-height: 80px; }
-        .btn-danger { background: var(--alert); color: #fff; padding: 0.5rem 1rem; border: none; border-radius: 6px; cursor: pointer; }
-        table { width: 100%; border-collapse: collapse; margin-top: 1rem; }
-        th, td { padding: 0.75rem; text-align: left; border-bottom: 1px solid var(--border); }
-        .category-tag { display: inline-block; padding: 0.25rem 0.5rem; background: var(--highlight); border-radius: 4px; font-size: 0.75rem; font-weight: 600; }
-    </style>
-</head>
-<body>
-    <?php $pageTitle = 'Admin'; require_once __DIR__ . '/includes/header.php'; ?>
-
-    <div class="container">
-        <?php if ($message): ?>
-            <div class="message <?= $messageType ?>"><?= htmlspecialchars($message) ?></div>
-        <?php endif; ?>
-
-        <div class="card">
-            <h2>Add Activity Type</h2>
-            <form method="POST" action="admin.php">
-                <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($_SESSION['csrf_token'] ?? '') ?>">
-                <input type="hidden" name="action" value="add">
-                <div class="form-group"><label for="name">Activity Name</label><input type="text" id="name" name="name" required></div>
-                <div class="form-group"><label for="category">Category</label><select id="category" name="category" required><option value="strength">Strength</option><option value="cardio">Cardio</option><option value="aquatic">Aquatic</option><option value="sport">Sport</option><option value="general">General</option></select></div>
-                <div class="form-group"><label for="measurement_model">Measurement Model</label><select id="measurement_model" name="measurement_model" required><option value="gym">Gym</option><option value="swimming">Swimming</option><option value="distance">Distance</option><option value="sport">Sport</option><option value="duration">Duration</option><option value="general">General</option></select></div>
-                <div class="form-group"><label for="default_unit">Default Unit</label><select id="default_unit" name="default_unit" required><option value="kg">Kilograms (kg)</option><option value="km">Kilometres (km)</option><option value="metres">Metres (m)</option><option value="minutes">Minutes</option><option value="none">None</option></select></div>
-                <div class="form-group"><label for="description">Description</label><textarea id="description" name="description" required></textarea></div>
-                <div class="form-group"><label for="safety_notes">Safety Notes</label><textarea id="safety_notes" name="safety_notes"></textarea></div>
-                <button type="submit" class="btn-primary" style="width: auto;">Add Activity Type</button>
-            </form>
-        </div>
-
-        <div class="card">
-            <h2>Manage Activity Types</h2>
-            <table>
-                <thead><tr><th>Name</th><th>Category</th><th>Unit</th><th>Published</th><th>Actions</th></tr></thead>
-                <tbody>
-                    <?php foreach ($activityTypes as $type): ?>
-                    <tr>
-                        <td><?= htmlspecialchars($type['name']) ?></td>
-                        <td><span class="category-tag"><?= htmlspecialchars($type['category']) ?></span></td>
-                        <td><?= htmlspecialchars($type['default_unit']) ?></td>
-                        <td><?= $type['is_published'] ? 'Yes' : 'No' ?></td>
-                        <td>
+<div class="main-content">
+    <?php if ($message): ?>
+    <div class="alert alert-<?= $messageType ?>" style="padding: 1rem; background: <?= $messageType === 'success' ? '#d4edda' : '#f8d7da' ?>; color: <?= $messageType === 'success' ? '#155724' : '#721c24' ?>; border-radius: 8px; margin-bottom: 1.5rem; border: 1px solid <?= $messageType === 'success' ? '#c3e6cb' : '#f5c6cb' ?>;"><?= htmlspecialchars($message) ?></div>
+    <?php endif; ?>
+    <!-- 1. Activity Types Management -->
+    <div class="card">
+        <h2>Manage Activity Types</h2>
+        <form method="POST" action="admin.php" style="display: flex; gap: 0.5rem; margin-bottom: 1rem;">
+            <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($_SESSION['csrf_token'] ?? '') ?>">
+            <input type="hidden" name="action" value="add_activity">
+            <!-- FIX: Added for/id pairing for label -->
+            <label for="new_activity_name" class="sr-only">New Activity Type Name</label>
+            <input type="text" id="new_activity_name" name="name" placeholder="New Activity Type" required style="flex-grow: 1; color: #222;">
+            <button type="submit" class="btn-primary">Add</button>
+        </form>
+        <table class="data-table">
+            <thead><tr><th>Name</th><th>Category</th><th>Actions</th></tr></thead>
+            <tbody>
+            <?php foreach ($types as $type): ?>
+            <tr>
+                <!-- FIX: Changed to high-contrast hex color -->
+                <td style="color: #222;"><?= htmlspecialchars($type['name']) ?></td>
+                <td style="color: #222;"><?= htmlspecialchars($type['category']) ?></td>
+                <td>
+                    <form method="POST" action="admin.php" style="display: inline;">
+                        <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($_SESSION['csrf_token'] ?? '') ?>">
+                        <input type="hidden" name="action" value="delete_activity">
+                        <input type="hidden" name="activity_type_id" value="<?= $type['activity_type_id'] ?>">
+                        <button type="submit" class="btn-danger" onclick="return confirm('Delete?')">Delete</button>
+                    </form>
+                </td>
+            </tr>
+            <?php endforeach; ?>
+            </tbody>
+        </table>
+    </div>
+    <!-- 2. Tenant User Management -->
+    <div class="card">
+        <h2>Tenant User Management</h2>
+        <!-- Add User Form -->
+        <form method="POST" action="admin.php" style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; margin-bottom: 2rem; padding-bottom: 1rem; border-bottom: 1px solid var(--border);">
+            <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($_SESSION['csrf_token'] ?? '') ?>">
+            <input type="hidden" name="action" value="add_user">
+            <!-- FIX: Added for/id pairing for all labels -->
+            <div class="form-group"><label for="admin_username">Username</label><input type="text" id="admin_username" name="username" required style="color: #222;"></div>
+            <div class="form-group"><label for="admin_email">Email</label><input type="email" id="admin_email" name="email" required style="color: #222;"></div>
+            <div class="form-group"><label for="admin_display_name">Display Name</label><input type="text" id="admin_display_name" name="display_name" required style="color: #222;"></div>
+            <div class="form-group"><label for="admin_password">Password (Min 8)</label><input type="password" id="admin_password" name="password" required minlength="8" style="color: #222;"></div>
+            <div class="form-group">
+                <!-- FIX: Added for/id pairing for select label -->
+                <label for="admin_role_id">Role</label>
+                <select id="admin_role_id" name="role_id" required style="color: #222; background: #fff;">
+                    <?php foreach ($roles as $role): ?>
+                    <option value="<?= $role['role_id'] ?>"><?= ucfirst(str_replace('_', ' ', $role['role_key'])) ?></option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+            <div class="form-group" style="display: flex; align-items: flex-end;">
+                <button type="submit" class="btn-primary">Create User</button>
+            </div>
+        </form>
+        <!-- User List -->
+        <table class="data-table">
+            <thead>
+            <tr>
+                <th>Name</th>
+                <th>Username</th>
+                <th>Role</th>
+                <th>Status</th>
+                <th>Actions</th>
+            </tr>
+            </thead>
+            <tbody>
+            <?php foreach ($userList as $user):
+                $isSelf = ($user['user_id'] === $adminUserId);
+                // FIX: Changed to high-contrast hex colors
+                $statusColor = $user['membership_status'] === 'active' ? '#1b5e20' : '#b71c1c';
+                $statusBg = $user['membership_status'] === 'active' ? '#e8f5e9' : '#ffebee';
+            ?>
+            <tr>
+                <!-- FIX: Changed to high-contrast hex colors -->
+                <td style="color: #222;"><?= htmlspecialchars($user['display_name']) ?></td>
+                <td style="color: #222;"><?= htmlspecialchars($user['username']) ?></td>
+                <td style="color: #222;"><?= ucfirst(str_replace('_', ' ', $user['role_key'])) ?></td>
+                <td style="color: <?= $statusColor ?>; background: <?= $statusBg ?>; padding: 0.25rem 0.5rem; border-radius: 4px; font-weight: bold; text-transform: uppercase; font-size: 0.85rem;"><?= ucfirst($user['membership_status']) ?></td>
+                <td>
+                    <?php if (!$isSelf): ?>
+                        <?php if ($user['membership_status'] === 'active'): ?>
                             <form method="POST" action="admin.php" style="display: inline;">
                                 <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($_SESSION['csrf_token'] ?? '') ?>">
-                                <input type="hidden" name="action" value="delete">
-                                <input type="hidden" name="activity_type_id" value="<?= $type['activity_type_id'] ?>">
-                                <button type="submit" class="btn-danger" onclick="return confirm('Delete this activity type?')">Delete</button>
+                                <input type="hidden" name="action" value="suspend_user">
+                                <input type="hidden" name="user_id" value="<?= $user['user_id'] ?>">
+                                <button type="submit" class="btn-danger" style="background: #f5e6a3; color: #333;" onclick="return confirm('Suspend (Ban) this user?')">Suspend</button>
                             </form>
-                        </td>
-                    </tr>
-                    <?php endforeach; ?>
-                </tbody>
-            </table>
-        </div>
+                            <form method="POST" action="admin.php" style="display: inline;">
+                                <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($_SESSION['csrf_token'] ?? '') ?>">
+                                <input type="hidden" name="action" value="remove_user">
+                                <input type="hidden" name="user_id" value="<?= $user['user_id'] ?>">
+                                <button type="submit" class="btn-danger" onclick="return confirm('Remove user from tenant?')">Remove</button>
+                            </form>
+                        <?php else: ?>
+                            <span style="font-size: 0.8rem; color: #555;">Inactive</span>
+                        <?php endif; ?>
+                    <?php else: ?>
+                        <span style="font-size: 0.8rem; color: #555;">(You)</span>
+                    <?php endif; ?>
+                </td>
+            </tr>
+            <?php endforeach; ?>
+            </tbody>
+        </table>
     </div>
-    <?php require_once __DIR__ . '/includes/footer.php'; ?>
-</body>
-</html>
+</div>
+<?php require_once __DIR__ . '/includes/footer.php'; ?>

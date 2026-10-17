@@ -1,17 +1,21 @@
+/* global document, window, localStorage, console, setInterval */
+'use strict';
+
 /**
  * File: main.js
  * Location: /public/js/main.js
+ *
  * Purpose:
  * Handles global client-side UI interactions. Manages the dark/light/system
  * theme toggle, sidebar collapse state, mobile navigation drawer, header
  * dropdowns (Notifications and Calendar), the live header clock, and the
  * SPA/MPA architecture toggle.
+ *
  * Architectural Role:
  * Acts as the presentation layer's interaction controller. Keeps generic
  * UI behaviours in a single file to maintain a clean separation of concerns
  * and ensure consistent UX across all pages.
  */
-'use strict';
 
 /**
  * Theme Management
@@ -22,6 +26,7 @@
 (function initThemeToggle() {
     const themeToggleBtn = document.getElementById('themeToggle');
     if (!themeToggleBtn) return;
+
     const rootElement = document.documentElement;
 
     function applyTheme(theme) {
@@ -42,13 +47,13 @@
     const savedTheme = localStorage.getItem('theme') || 'system';
     applyTheme(savedTheme);
 
-    window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (e) => {
+    window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', function () {
         if (localStorage.getItem('theme') === 'system') {
             applyTheme('system');
         }
     });
 
-    themeToggleBtn.addEventListener('click', () => {
+    themeToggleBtn.addEventListener('click', function () {
         const isCurrentlyDark = rootElement.getAttribute('data-theme') === 'dark';
         const newTheme = isCurrentlyDark ? 'light' : 'dark';
         applyTheme(newTheme);
@@ -69,7 +74,7 @@
         sidebar.classList.add('collapsed');
     }
 
-    toggleBtn.addEventListener('click', () => {
+    toggleBtn.addEventListener('click', function () {
         sidebar.classList.toggle('collapsed');
         const newState = sidebar.classList.contains('collapsed');
         localStorage.setItem('sidebarCollapsed', newState);
@@ -85,12 +90,11 @@
     const sidebar = document.querySelector('.sidebar');
     if (!toggleBtn || !sidebar) return;
 
-    toggleBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
+    toggleBtn.addEventListener('click', function () {
         sidebar.classList.toggle('mobile-open');
     });
 
-    document.addEventListener('click', (e) => {
+    document.addEventListener('click', function (e) {
         if (window.innerWidth <= 768 &&
             !sidebar.contains(e.target) &&
             !toggleBtn.contains(e.target) &&
@@ -110,26 +114,30 @@
     const menus = document.querySelectorAll('.dropdown-menu');
     if (!triggers.length || !menus.length) return;
 
-    triggers.forEach(trigger => {
-        trigger.addEventListener('click', (e) => {
+    triggers.forEach(function (trigger) {
+        trigger.addEventListener('click', function (e) {
             e.stopPropagation();
             const targetMenu = trigger.closest('.dropdown-container').querySelector('.dropdown-menu');
-            menus.forEach(menu => {
+            menus.forEach(function (menu) {
                 if (menu !== targetMenu) menu.classList.remove('active');
             });
             targetMenu.classList.toggle('active');
         });
     });
 
-    document.addEventListener('click', (e) => {
+    document.addEventListener('click', function (e) {
         if (!e.target.closest('.dropdown-container')) {
-            menus.forEach(menu => menu.classList.remove('active'));
+            menus.forEach(function (menu) {
+                menu.classList.remove('active');
+            });
         }
     });
 
-    document.addEventListener('keydown', (e) => {
+    document.addEventListener('keydown', function (e) {
         if (e.key === 'Escape') {
-            menus.forEach(menu => menu.classList.remove('active'));
+            menus.forEach(function (menu) {
+                menu.classList.remove('active');
+            });
         }
     });
 })();
@@ -160,7 +168,7 @@
 
 /**
  * SPA/MPA Architecture Toggle
- * Persists user preference in localStorage and routes between the 
+ * Persists user preference in localStorage and routes between the
  * Multi-Page Application and the Single-Page Application shell,
  * maintaining the current page context across the switch.
  */
@@ -168,47 +176,41 @@
     const toggle = document.getElementById('spaModeToggle');
     const mpaLabel = document.getElementById('mpaLabel');
     const spaLabel = document.getElementById('spaLabel');
-
     if (!toggle) return;
 
     // 1. Load saved preference on page load
     const isSpaMode = localStorage.getItem('fittrack_spa_mode') === 'true';
     toggle.checked = isSpaMode;
-    
     if (mpaLabel) mpaLabel.classList.toggle('active', !isSpaMode);
     if (spaLabel) spaLabel.classList.toggle('active', isSpaMode);
 
     // 2. Handle Toggle Click
-    toggle.addEventListener('change', (e) => {
-        const enabled = e.target.checked;
+    toggle.addEventListener('change', function () {
+        const enabled = toggle.checked;
         localStorage.setItem('fittrack_spa_mode', enabled);
 
         if (mpaLabel) mpaLabel.classList.toggle('active', !enabled);
         if (spaLabel) spaLabel.classList.toggle('active', enabled);
 
         // 3. Smart Routing: Maintain current page context
-        let currentPage = 'dashboard'; // Default fallback
+        let currentPage = 'dashboard';
 
         if (enabled) {
             // Switching MPA -> SPA
             const path = window.location.pathname;
-            // Handle both /workouts.php and /spa/index.php paths
             const spaMatch = path.match(/\/spa\/index\.php$/);
             const mpaMatch = path.match(/\/([a-z]+)\.php$/);
-            
+
             if (mpaMatch && mpaMatch[1] && !spaMatch) {
                 currentPage = mpaMatch[1];
             } else if (spaMatch) {
-                // If already in SPA path, try to get hash
                 const hash = window.location.hash.replace('#', '');
                 if (hash) currentPage = hash;
             }
-            
-            // Also check hash as fallback
+
             const hash = window.location.hash.replace('#', '');
             if (hash && hash !== 'index') currentPage = hash;
-            
-            // Last resort: check localStorage
+
             const savedRoute = localStorage.getItem('fittrack_current_route');
             if (savedRoute) currentPage = savedRoute;
 
@@ -220,8 +222,7 @@
             if (hash && hash !== 'index') {
                 currentPage = hash;
             }
-            
-            // Fallback to localStorage
+
             const savedRoute = localStorage.getItem('fittrack_current_route');
             if (savedRoute && savedRoute !== 'index') {
                 currentPage = savedRoute;

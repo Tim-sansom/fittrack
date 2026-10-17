@@ -32,14 +32,13 @@ if (!isset($_SESSION['user_id'])) {
 $db = Database::getInstance()->getConnection();
 $userId = (int)$_SESSION['user_id'];
 $tenantId = (int)$_SESSION['tenant_id'];
-
 $pageTitle = 'Progress';
 $currentPage = 'progress';
 
 // 1. Fetch Latest vs Previous Measurements (for Scorecard deltas)
 $stmt = $db->prepare("
     SELECT weight_kg, bmi, chest_cm, waist_cm,
-           left_arm_cm, right_arm_cm, left_leg_cm, right_leg_cm, recorded_at
+    left_arm_cm, right_arm_cm, left_leg_cm, right_leg_cm, recorded_at
     FROM user_measurements
     WHERE user_id = :uid
     ORDER BY recorded_at DESC LIMIT 2
@@ -58,7 +57,7 @@ $bmiDelta = $calcDelta((float)($latest['bmi'] ?? 0), (float)($previous['bmi'] ??
 // Grouped by week for 'month' and 'year' views to reduce visual noise
 $stmt = $db->prepare("
     SELECT DATE_FORMAT(recorded_at, '%Y-%u') as week_key,
-           MIN(recorded_at) as date, AVG(weight_kg) as avg_weight
+    MIN(recorded_at) as date, AVG(weight_kg) as avg_weight
     FROM user_measurements
     WHERE user_id = :uid
     GROUP BY week_key
@@ -117,54 +116,57 @@ $chartDataJson = json_encode([
 require_once __DIR__ . '/includes/header.php';
 require_once __DIR__ . '/includes/sidebar.php';
 ?>
-
 <div class="main-content">
     <!-- Scorecard Section: Displays current metrics and historical deltas -->
+    <!-- FIX: Added h2 wrapper to fix skipped heading level (h1 -> h3) -->
+    <h2 class="sr-only">Body Measurements</h2>
     <div class="progress-scorecard">
         <div class="score-card">
-            <span class="score-label">Current Weight</span>
-            <p class="score-value"><?= $latest['weight_kg'] ?? '--' ?> <span style="font-size:1rem;opacity:0.6">kg</span></p>
-            <span class="score-delta <?= $weightDelta < 0 ? 'positive' : 'negative' ?>">
+            <!-- FIX: Changed span to h3 for proper heading structure -->
+            <h3 class="score-label">Current Weight</h3>
+            <p class="score-value"><?= $latest['weight_kg'] ?? '--' ?> <span style="font-size:1rem;color:#555">kg</span></p>
+            <!-- FIX: Darkened delta text colour for contrast compliance -->
+            <span class="score-delta" style="color: <?= $weightDelta < 0 ? '#1b5e20' : '#b71c1c' ?>; font-weight: bold;">
                 <?= $weightDelta > 0 ? '↑' : '↓' ?> <?= abs($weightDelta) ?>% vs last
             </span>
         </div>
         <div class="score-card">
-            <span class="score-label">BMI Score</span>
+            <h3 class="score-label">BMI Score</h3>
             <p class="score-value"><?= $latest['bmi'] ?? '--' ?></p>
-            <span class="score-delta <?= $bmiDelta < 0 ? 'positive' : 'negative' ?>">
+            <span class="score-delta" style="color: <?= $bmiDelta < 0 ? '#1b5e20' : '#b71c1c' ?>; font-weight: bold;">
                 <?= $bmiDelta > 0 ? '↑' : '↓' ?> <?= abs($bmiDelta) ?>% vs last
             </span>
         </div>
         <div class="score-card">
-            <span class="score-label">Chest</span>
-            <p class="score-value"><?= $latest['chest_cm'] ?? '--' ?> <span style="font-size:1rem;opacity:0.6">cm</span></p>
+            <h3 class="score-label">Chest</h3>
+            <p class="score-value"><?= $latest['chest_cm'] ?? '--' ?> <span style="font-size:1rem;color:#555">cm</span></p>
         </div>
         <div class="score-card">
-            <span class="score-label">Waist</span>
-            <p class="score-value"><?= $latest['waist_cm'] ?? '--' ?> <span style="font-size:1rem;opacity:0.6">cm</span></p>
+            <h3 class="score-label">Waist</h3>
+            <p class="score-value"><?= $latest['waist_cm'] ?? '--' ?> <span style="font-size:1rem;color:#555">cm</span></p>
         </div>
         <div class="score-card">
-            <span class="score-label">Left Arm</span>
-            <p class="score-value"><?= $latest['left_arm_cm'] ?? '--' ?> <span style="font-size:1rem;opacity:0.6">cm</span></p>
+            <h3 class="score-label">Left Arm</h3>
+            <p class="score-value"><?= $latest['left_arm_cm'] ?? '--' ?> <span style="font-size:1rem;color:#555">cm</span></p>
         </div>
         <div class="score-card">
-            <span class="score-label">Right Arm</span>
-            <p class="score-value"><?= $latest['right_arm_cm'] ?? '--' ?> <span style="font-size:1rem;opacity:0.6">cm</span></p>
+            <h3 class="score-label">Right Arm</h3>
+            <p class="score-value"><?= $latest['right_arm_cm'] ?? '--' ?> <span style="font-size:1rem;color:#555">cm</span></p>
         </div>
         <div class="score-card">
-            <span class="score-label">Left Leg</span>
-            <p class="score-value"><?= $latest['left_leg_cm'] ?? '--' ?> <span style="font-size:1rem;opacity:0.6">cm</span></p>
+            <h3 class="score-label">Left Leg</h3>
+            <p class="score-value"><?= $latest['left_leg_cm'] ?? '--' ?> <span style="font-size:1rem;color:#555">cm</span></p>
         </div>
         <div class="score-card">
-            <span class="score-label">Right Leg</span>
-            <p class="score-value"><?= $latest['right_leg_cm'] ?? '--' ?> <span style="font-size:1rem;opacity:0.6">cm</span></p>
+            <h3 class="score-label">Right Leg</h3>
+            <p class="score-value"><?= $latest['right_leg_cm'] ?? '--' ?> <span style="font-size:1rem;color:#555">cm</span></p>
         </div>
     </div>
 
     <!-- Weight Trend Chart -->
     <div class="chart-section" data-chart-type="weight">
         <div class="chart-header">
-            <h3>Weight Trend</h3>
+            <h2>Weight Trend</h2>
             <div class="time-range-toggles">
                 <button data-range="week">Week</button>
                 <button data-range="month" class="active">Month</button>
@@ -177,7 +179,7 @@ require_once __DIR__ . '/includes/sidebar.php';
     <!-- Volume Trend Chart -->
     <div class="chart-section" data-chart-type="volume">
         <div class="chart-header">
-            <h3>Activity Volume (Minutes)</h3>
+            <h2>Activity Volume (Minutes)</h2>
             <div class="time-range-toggles">
                 <button data-range="week">Week</button>
                 <button data-range="month" class="active">Month</button>
@@ -190,7 +192,7 @@ require_once __DIR__ . '/includes/sidebar.php';
     <!-- Performance Radar Chart -->
     <div class="chart-section">
         <div class="chart-header">
-            <h3>Performance Scorecard</h3>
+            <h2>Performance Scorecard</h2>
         </div>
         <div class="chart-wrapper" id="radarChart" style="display:flex;justify-content:center;"></div>
     </div>
@@ -199,5 +201,4 @@ require_once __DIR__ . '/includes/sidebar.php';
     <script type="application/json" id="chartData"><?= $chartDataJson ?></script>
     <script src="/js/progress.js"></script>
 </div>
-
 <?php require_once __DIR__ . '/includes/footer.php'; ?>

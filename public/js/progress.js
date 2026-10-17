@@ -1,19 +1,20 @@
+/* global document, window, IntersectionObserver, setTimeout, JSON */
+'use strict';
+
 /**
  * File: progress.js
  * Location: /public/js/progress.js
- * 
+ *
  * Purpose:
  * Custom Vanilla JS SVG Charting Engine. Renders Line, Area, and Radar charts
  * without external libraries. Implements scroll-triggered animations and
  * mouse-tracking tooltips.
- * 
+ *
  * Architectural Role:
  * Demonstrates advanced client-side data visualisation and state management.
- * Satisfies the "independent contribution" criteria by building complex UI 
+ * Satisfies the "independent contribution" criteria by building complex UI
  * components from scratch using pure mathematics and DOM APIs.
  */
-
-'use strict';
 
 const ProgressCharts = {
     /**
@@ -24,7 +25,7 @@ const ProgressCharts = {
         this.data = data;
         this.currentRange = 'month';
         this.tooltip = this.createTooltip();
-        
+
         this.renderWeightChart('month');
         this.renderVolumeChart('month');
         this.renderRadarChart();
@@ -62,7 +63,7 @@ const ProgressCharts = {
     renderWeightChart(range) {
         const container = document.getElementById('weightChart');
         if (!container) return;
-        
+
         const dataset = this.data.weight[range] || [];
         if (dataset.length === 0) {
             container.innerHTML = '<p class="empty-state">Log measurements to see trends.</p>';
@@ -76,7 +77,7 @@ const ProgressCharts = {
         const minVal = Math.min(...dataset.map(d => d.value)) * 0.9;
 
         let svg = `<svg class="chart-svg" viewBox="0 0 ${width} ${height}">`;
-        
+
         // Grid lines
         for (let i = 0; i <= 4; i++) {
             const y = padding + (i / 4) * (height - 2 * padding);
@@ -143,6 +144,7 @@ const ProgressCharts = {
 
         let pathD = `M ${points[0].x} ${points[0].y}`;
         for (let i = 1; i < points.length; i++) pathD += ` L ${points[i].x} ${points[i].y}`;
+        
         const areaD = `${pathD} L ${points[points.length-1].x} ${height-padding} L ${points[0].x} ${height-padding} Z`;
 
         svg += `<path class="chart-area animate-draw" d="${areaD}" fill="var(--highlight)" opacity="0"/>`;
@@ -191,7 +193,6 @@ const ProgressCharts = {
             const x = center.x + radius * Math.cos(angle);
             const y = center.y + radius * Math.sin(angle);
             svg += `<line x1="${center.x}" y1="${center.y}" x2="${x}" y2="${y}" class="radar-axis"/>`;
-            
             const labelX = center.x + (radius + 20) * Math.cos(angle);
             const labelY = center.y + (radius + 20) * Math.sin(angle);
             svg += `<text x="${labelX}" y="${labelY + 4}" class="radar-label">${m.label}</text>`;
@@ -244,7 +245,7 @@ const ProgressCharts = {
             btn.addEventListener('click', (e) => {
                 const range = e.target.dataset.range;
                 const chartType = e.target.closest('.chart-section').dataset.chartType;
-                
+
                 // Update active state
                 e.target.parentElement.querySelectorAll('button').forEach(b => b.classList.remove('active'));
                 e.target.classList.add('active');
@@ -252,7 +253,7 @@ const ProgressCharts = {
                 // Re-render specific chart
                 if (chartType === 'weight') this.renderWeightChart(range);
                 if (chartType === 'volume') this.renderVolumeChart(range);
-                
+
                 // Re-attach animations
                 setTimeout(() => this.initScrollAnimations(), 50);
             });

@@ -40,7 +40,7 @@ try {
 
     // We only backfill up to yesterday. We leave today blank so the marker 
     // can see an "empty" state and potentially log a workout themselves.
-    $endDate = new DateTime('-1 day'); 
+    $endDate = new DateTime('+1 day'); 
 
     // If the start date is in the future, we have no work to do.
     if ($startDate > $endDate) {

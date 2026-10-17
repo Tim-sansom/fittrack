@@ -2,9 +2,7 @@
 -- FitTrack Multi-Tenant Relational Database Schema (Final Production Version)
 -- Target: MySQL 8.x / MariaDB 11.x / InnoDB
 -- ==============================================================================
-
 SET FOREIGN_KEY_CHECKS = 0;
-
 DROP TABLE IF EXISTS audit_logs;
 DROP TABLE IF EXISTS security_events;
 DROP TABLE IF EXISTS rate_limits;
@@ -24,19 +22,21 @@ DROP TABLE IF EXISTS exercises;
 DROP TABLE IF EXISTS activity_types;
 DROP TABLE IF EXISTS user_preferences;
 DROP TABLE IF EXISTS user_totp;
+DROP TABLE IF EXISTS user_profiles;
 DROP TABLE IF EXISTS tenant_memberships;
 DROP TABLE IF EXISTS permissions;
 DROP TABLE IF EXISTS role_permissions;
 DROP TABLE IF EXISTS roles;
 DROP TABLE IF EXISTS users;
 DROP TABLE IF EXISTS tenants;
-
+DROP TABLE IF EXISTS daily_nutrition;
+DROP TABLE IF EXISTS kudos;
+DROP TABLE IF EXISTS challenges;
 SET FOREIGN_KEY_CHECKS = 1;
 
 -- ==============================================================================
 -- CORE TENANT & USER TABLES
 -- ==============================================================================
-
 CREATE TABLE tenants (
     tenant_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
     tenant_name VARCHAR(100) NOT NULL,
@@ -54,6 +54,7 @@ CREATE TABLE users (
     email VARCHAR(254) NOT NULL,
     password_hash VARCHAR(255) NOT NULL,
     display_name VARCHAR(80) NOT NULL,
+    avatar_path VARCHAR(255) NULL,
     bio VARCHAR(500) NULL,
     date_of_birth_encrypted TEXT NULL,
     account_status ENUM('active', 'suspended', 'disabled') NOT NULL DEFAULT 'active',
@@ -63,6 +64,19 @@ CREATE TABLE users (
     PRIMARY KEY (user_id),
     UNIQUE KEY uq_users_username (username),
     UNIQUE KEY uq_users_email (email)
+) ENGINE = InnoDB;
+
+-- ADDED: user_profiles table (Missing from original schema, required by Workouts page)
+CREATE TABLE user_profiles (
+    user_id BIGINT UNSIGNED NOT NULL,
+    age_band ENUM('16-17','18-24','25-34','35-44','45-54','55-64','65-80') NOT NULL,
+    gender_identity ENUM('female','male','non_binary','prefer_not_to_say') NOT NULL DEFAULT 'prefer_not_to_say',
+    locality VARCHAR(80) NOT NULL,
+    bio VARCHAR(500) DEFAULT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (user_id),
+    CONSTRAINT fk_dummy_profiles_user FOREIGN KEY (user_id) REFERENCES users (user_id) ON DELETE CASCADE ON UPDATE CASCADE
 ) ENGINE = InnoDB;
 
 CREATE TABLE roles (
@@ -113,7 +127,6 @@ CREATE TABLE tenant_memberships (
 -- ==============================================================================
 -- USER PREFERENCES & SECURITY
 -- ==============================================================================
-
 CREATE TABLE user_preferences (
     preference_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
     tenant_id BIGINT UNSIGNED NOT NULL,
@@ -154,7 +167,6 @@ CREATE TABLE user_totp (
 -- ==============================================================================
 -- ACTIVITY CATALOGUE & LOCATIONS
 -- ==============================================================================
-
 CREATE TABLE activity_types (
     activity_type_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
     tenant_id BIGINT UNSIGNED NOT NULL,
@@ -218,7 +230,6 @@ CREATE TABLE activity_locations (
 -- ==============================================================================
 -- PLANNING & ACTIVITY LOGGING
 -- ==============================================================================
-
 CREATE TABLE plans (
     plan_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
     tenant_id BIGINT UNSIGNED NOT NULL,
@@ -283,10 +294,60 @@ CREATE TABLE activity_logs (
     CONSTRAINT fk_al_location FOREIGN KEY (location_id) REFERENCES activity_locations (location_id) ON DELETE SET NULL ON UPDATE CASCADE
 ) ENGINE = InnoDB;
 
+-- FIXED: daily_nutrition now includes macro columns directly in CREATE statement
+CREATE TABLE daily_nutrition (
+    nutrition_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    tenant_id BIGINT UNSIGNED NOT NULL,
+    user_id BIGINT UNSIGNED NOT NULL,
+    log_date DATE NOT NULL,
+    calories_consumed INT UNSIGNED NOT NULL DEFAULT 0,
+    calories_burned INT UNSIGNED NOT NULL DEFAULT 0,
+    protein_g INT UNSIGNED NULL DEFAULT 0,
+    carbs_g INT UNSIGNED NULL DEFAULT 0,
+    fats_g INT UNSIGNED NULL DEFAULT 0,
+    notes VARCHAR(500) DEFAULT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (nutrition_id),
+    UNIQUE KEY uq_nutrition_user_date (tenant_id, user_id, log_date),
+    CONSTRAINT fk_nutrition_tenant FOREIGN KEY (tenant_id) REFERENCES tenants (tenant_id) ON DELETE CASCADE,
+    CONSTRAINT fk_nutrition_user FOREIGN KEY (tenant_id, user_id) REFERENCES tenant_memberships (tenant_id, user_id) ON DELETE CASCADE
+) ENGINE = InnoDB;
+
+CREATE TABLE kudos (
+    kudos_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    user_id BIGINT UNSIGNED NOT NULL,
+    activity_log_id BIGINT UNSIGNED NOT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (kudos_id),
+    UNIQUE KEY uq_kudos_user_activity (user_id, activity_log_id),
+    KEY idx_kudos_activity (activity_log_id),
+    CONSTRAINT fk_kudos_activity FOREIGN KEY (activity_log_id) REFERENCES activity_logs (activity_log_id) ON DELETE CASCADE ON UPDATE CASCADE,
+    CONSTRAINT fk_kudos_user FOREIGN KEY (user_id) REFERENCES users (user_id) ON DELETE CASCADE ON UPDATE CASCADE
+) ENGINE = InnoDB;
+
+CREATE TABLE challenges (
+    challenge_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    tenant_id BIGINT UNSIGNED NOT NULL,
+    user_id BIGINT UNSIGNED NOT NULL,
+    title VARCHAR(100) NOT NULL,
+    description VARCHAR(500) DEFAULT NULL,
+    target_value INT UNSIGNED NOT NULL,
+    current_value INT UNSIGNED NOT NULL DEFAULT 0,
+    unit VARCHAR(20) NOT NULL,
+    start_date DATE NOT NULL,
+    end_date DATE NOT NULL,
+    status ENUM('active', 'completed', 'archived') NOT NULL DEFAULT 'active',
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (challenge_id),
+    KEY idx_challenges_tenant_user (tenant_id, user_id),
+    CONSTRAINT fk_challenges_tenant FOREIGN KEY (tenant_id) REFERENCES tenants (tenant_id) ON DELETE CASCADE ON UPDATE CASCADE,
+    CONSTRAINT fk_challenges_user FOREIGN KEY (tenant_id, user_id) REFERENCES tenant_memberships (tenant_id, user_id) ON DELETE CASCADE ON UPDATE CASCADE
+) ENGINE = InnoDB;
+
 -- ==============================================================================
 -- SPECIALISED ACTIVITY TRACKING (GYM, SWIMMING, SPORT)
 -- ==============================================================================
-
 CREATE TABLE gym_sessions (
     gym_session_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
     tenant_id BIGINT UNSIGNED NOT NULL,
@@ -374,7 +435,6 @@ CREATE TABLE sport_logs (
 -- ==============================================================================
 -- SECURITY, AUDIT & MODERATION
 -- ==============================================================================
-
 CREATE TABLE password_reset_tokens (
     reset_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
     user_id BIGINT UNSIGNED NOT NULL,
@@ -479,7 +539,6 @@ CREATE TABLE rate_limits (
 -- ==============================================================================
 -- BASE SEED DATA (Roles, Permissions, Default Tenants)
 -- ==============================================================================
-
 INSERT INTO roles (role_key, role_name, description) VALUES
 ('super_administrator', 'Super administrator', 'Full control within an assigned tenant'),
 ('administrator', 'Administrator', 'Manages tenant content and selected users'),
@@ -524,8 +583,3 @@ WHERE r.role_key = 'super_administrator';
 INSERT INTO tenants (tenant_name, tenant_slug) VALUES
 ('North Yorkshire Fitness', 'north-yorkshire-fitness'),
 ('West Yorkshire Fitness', 'west-yorkshire-fitness');
-
-ALTER TABLE daily_nutrition
-ADD COLUMN protein_g INT UNSIGNED NULL DEFAULT 0,
-ADD COLUMN carbs_g INT UNSIGNED NULL DEFAULT 0,
-ADD COLUMN fats_g INT UNSIGNED NULL DEFAULT 0;
