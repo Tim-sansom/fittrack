@@ -39,7 +39,8 @@ window.toggleKudos = function (activityId, btnElement) {
     countSpan.textContent = currentCount;
 
     // 2. Asynchronous Server Request
-    fetch('/api/kudos.php', {
+    // FIXED: Removed leading slash and added '../' to go up from js/ to public/
+    fetch('../api/kudos.php', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ activity_log_id: activityId })

@@ -178,8 +178,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 exit;
             }
 
-            $stmt = $db->prepare("UPDATE plan_items SET completion_status = :status WHERE plan_item_id = :iid");
-            $stmt->execute(['status' => $newStatus, 'iid' => $itemId]);
+            // ENHANCED: Added user_id and tenant_id to the UPDATE WHERE clause for bulletproof security
+            $stmt = $db->prepare("UPDATE plan_items SET completion_status = :status WHERE plan_item_id = :iid AND user_id = :uid AND tenant_id = :tid");
+            $stmt->execute(['status' => $newStatus, 'iid' => $itemId, 'uid' => $userId, 'tid' => $tenantId]);
             echo json_encode(['success' => true]);
 
         } elseif ($action === 'delete_plan') {

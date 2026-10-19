@@ -6,21 +6,15 @@
  * Purpose:
  * Provides the user profile interface with avatar management,
  * personal information editing, and body measurement tracking.
- *
- * Architectural Role:
- * Uses the SaaS layout (header + sidebar includes). Avatar uploads are
- * validated by MIME type and stored as files with sanitised filenames.
- *
- * Security:
- * - All updates scoped to authenticated user_id.
- * - Avatar uploads validated by MIME type and size.
- * - Output escaped with htmlspecialchars().
- * - CSRF token verified on POST requests.
  */
 declare(strict_types=1);
 require_once __DIR__ . '/../config/Session.php';
 require_once __DIR__ . '/../config/Database.php';
 Session::start();
+
+// Explicitly set SPA mode to MPA so the header toggle renders correctly
+$_SESSION['spa_mode'] = 'mpa';
+
 if (!isset($_SESSION['user_id'])) {
     header('Location: login.php');
     exit;
@@ -30,21 +24,20 @@ $userId = (int)$_SESSION['user_id'];
 $tenantId = (int)$_SESSION['tenant_id'];
 $pageTitle = 'Profile';
 $currentPage = 'profile';
-
 /*
  * Fetch user, profile, and latest measurements in a single pass.
  */
 $stmt = $db->prepare("
     SELECT u.display_name, u.bio, u.avatar_path,
-    p.age_band, p.gender_identity, p.locality,
-    m.weight_kg, m.bmi, m.chest_cm, m.waist_cm,
-    m.hips_cm, m.left_arm_cm, m.right_arm_cm,
-    m.left_leg_cm, m.right_leg_cm, m.height_cm
+           p.age_band, p.gender_identity, p.locality,
+           m.weight_kg, m.bmi, m.chest_cm, m.waist_cm,
+           m.hips_cm, m.left_arm_cm, m.right_arm_cm,
+           m.left_leg_cm, m.right_leg_cm, m.height_cm
     FROM users u
     LEFT JOIN user_profiles p ON p.user_id = u.user_id
     LEFT JOIN (
         SELECT user_id, weight_kg, bmi, chest_cm, waist_cm, hips_cm,
-        left_arm_cm, right_arm_cm, left_leg_cm, right_leg_cm, height_cm
+               left_arm_cm, right_arm_cm, left_leg_cm, right_leg_cm, height_cm
         FROM user_measurements
         WHERE user_id = :uid_sub
         ORDER BY recorded_at DESC LIMIT 1
@@ -53,7 +46,6 @@ $stmt = $db->prepare("
 ");
 $stmt->execute(['uid_sub' => $userId, 'uid_main' => $userId]);
 $data = $stmt->fetch(PDO::FETCH_ASSOC);
-
 // Provide safe defaults when rows are missing
 $displayName = $data['display_name'] ?? '';
 $bio = $data['bio'] ?? '';
@@ -73,10 +65,8 @@ $measurements = [
     'right_leg_cm' => $data['right_leg_cm'] ?? '',
     'bmi' => $data['bmi'] ?? 0,
 ];
-
 /*
  * Handle avatar upload POST.
- * Validates file type and size, moves to uploads directory, and updates DB.
  */
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_avatar'])) {
     if (!hash_equals($_SESSION['csrf_token'] ?? '', $_POST['csrf_token'] ?? '')) {
@@ -93,18 +83,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_avatar'])) {
             $newFileName = 'user_' . $userId . '_' . time() . '.' . $fileExt;
             $uploadPath = $uploadDir . $newFileName;
             if (move_uploaded_file($_FILES['avatar']['tmp_name'], $uploadPath)) {
-                if ($avatarPath && file_exists(__DIR__ . $avatarPath)) {
-                    @unlink(__DIR__ . $avatarPath);
+                if ($avatarPath && file_exists(__DIR__ . '/' . ltrim($avatarPath, '/'))) {
+                    @unlink(__DIR__ . '/' . ltrim($avatarPath, '/'));
                 }
+                $relativePath = 'uploads/avatars/' . $newFileName;
                 $stmt = $db->prepare("UPDATE users SET avatar_path = :path WHERE user_id = :id");
-                $stmt->execute(['path' => '/uploads/avatars/' . $newFileName, 'id' => $userId]);
+                $stmt->execute(['path' => $relativePath, 'id' => $userId]);
             }
         }
     }
     header('Location: profile.php');
     exit;
 }
-
 /*
  * Handle profile information POST.
  */
@@ -133,7 +123,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_profile'])) {
     header('Location: profile.php?saved=1');
     exit;
 }
-
 /*
  * Handle measurements POST.
  */
@@ -147,7 +136,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_measurements']
     $stmt = $db->prepare("
         INSERT INTO user_measurements
         (user_id, height_cm, weight_kg, chest_cm, waist_cm, hips_cm,
-        left_arm_cm, right_arm_cm, left_leg_cm, right_leg_cm, bmi)
+         left_arm_cm, right_arm_cm, left_leg_cm, right_leg_cm, bmi)
         VALUES (:uid_meas, :h, :w, :chest, :waist, :hips, :la, :ra, :ll, :rl, :bmi)
     ");
     $stmt->execute([
@@ -165,7 +154,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_measurements']
     header('Location: profile.php?measurements=1');
     exit;
 }
-
 require_once __DIR__ . '/includes/header.php';
 require_once __DIR__ . '/includes/sidebar.php';
 ?>
@@ -173,15 +161,19 @@ require_once __DIR__ . '/includes/sidebar.php';
     <div class="profile-header-row">
         <div class="profile-avatar-section">
             <div class="avatar-large-container">
-                <?php if ($avatarPath): ?>
-                    <img src="<?= htmlspecialchars($avatarPath) ?>" alt="Profile avatar" class="avatar-large">
+                <?php
+                $cleanAvatarPath = $avatarPath ? ltrim($avatarPath, '/') : null;
+                $fileExists = $cleanAvatarPath && file_exists(__DIR__ . '/' . $cleanAvatarPath);
+                if ($fileExists):
+                ?>
+                    <img src="<?= htmlspecialchars($cleanAvatarPath) ?>" alt="Profile avatar" class="avatar-large">
                 <?php else: ?>
                     <div class="avatar-large avatar-initials">
                         <?= htmlspecialchars(strtoupper(substr(str_replace(' ', '', $displayName), 0, 2))) ?>
                     </div>
                 <?php endif; ?>
             </div>
-            <button type="button" id="upload-trigger-btn" class="btn-upload-avatar" title="Change avatar" aria-label="Change profile photo">
+            <button type="button" id="upload-trigger-btn" class="btn-upload-avatar" title="Change avatar" aria-label="Change profile photo" data-tooltip="Click to upload a new profile picture.">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16" aria-hidden="true">
                     <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
                     <polyline points="17 8 12 3 7 8"></polyline>
@@ -198,14 +190,14 @@ require_once __DIR__ . '/includes/sidebar.php';
                         <canvas id="crop-preview-canvas" width="300" height="300" style="width: 100%; height: 100%;"></canvas>
                     </div>
                     <div class="crop-controls" style="display: flex; flex-direction: column; gap: 1rem; margin-bottom: 1.5rem;">
-                        <label style="color: var(--text); font-size: 0.9rem;">Zoom: <input type="range" id="crop-zoom" min="0.1" max="3" step="0.05" value="1" style="width: 100%;"></label>
-                        <label style="color: var(--text); font-size: 0.9rem;">Horizontal: <input type="range" id="crop-pan-x" min="-300" max="300" value="0" style="width: 100%;"></label>
-                        <label style="color: var(--text); font-size: 0.9rem;">Vertical: <input type="range" id="crop-pan-y" min="-300" max="300" value="0" style="width: 100%;"></label>
+                        <label style="color: var(--text); font-size: 0.9rem;" data-tooltip="Adjust the zoom level of the image.">Zoom: <input type="range" id="crop-zoom" min="0.1" max="3" step="0.05" value="1" style="width: 100%;"></label>
+                        <label style="color: var(--text); font-size: 0.9rem;" data-tooltip="Move the image left or right.">Horizontal: <input type="range" id="crop-pan-x" min="-300" max="300" value="0" style="width: 100%;"></label>
+                        <label style="color: var(--text); font-size: 0.9rem;" data-tooltip="Move the image up or down.">Vertical: <input type="range" id="crop-pan-y" min="-300" max="300" value="0" style="width: 100%;"></label>
                     </div>
                     <input type="hidden" id="csrf-token-input" value="<?= htmlspecialchars($_SESSION['csrf_token'] ?? '') ?>">
                     <div style="display: flex; justify-content: flex-end; gap: 1rem;">
-                        <button type="button" id="cancel-crop-btn" class="btn-secondary">Cancel</button>
-                        <button type="button" id="save-crop-btn" class="btn-primary">Apply & Upload</button>
+                        <button type="button" id="cancel-crop-btn" class="btn-secondary" data-tooltip="Cancel and close the cropper.">Cancel</button>
+                        <button type="button" id="save-crop-btn" class="btn-primary" data-tooltip="Apply changes and upload the new avatar.">Apply & Upload</button>
                     </div>
                 </div>
             </div>
@@ -221,10 +213,10 @@ require_once __DIR__ . '/includes/sidebar.php';
         </div>
     </div>
     <?php if (isset($_GET['saved'])): ?>
-        <div class="alert-success">Profile updated successfully.</div>
+        <div class="alert alert-success" role="alert" style="padding: 1rem; border-radius: 8px; margin-bottom: 1.5rem; background: rgba(76,175,80,0.1); color: var(--success); border: 1px solid var(--success);">Profile updated successfully.</div>
     <?php endif; ?>
     <?php if (isset($_GET['measurements'])): ?>
-        <div class="alert-success">Measurements recorded.</div>
+        <div class="alert alert-success" role="alert" style="padding: 1rem; border-radius: 8px; margin-bottom: 1.5rem; background: rgba(76,175,80,0.1); color: var(--success); border: 1px solid var(--success);">Measurements recorded.</div>
     <?php endif; ?>
     <div class="profile-grid">
         <!-- Personal Information -->
@@ -236,15 +228,15 @@ require_once __DIR__ . '/includes/sidebar.php';
                 <div class="form-grid-2">
                     <div class="form-group">
                         <label for="display_name">Display Name</label>
-                        <input type="text" id="display_name" name="display_name" value="<?= htmlspecialchars($displayName) ?>" required>
+                        <input type="text" id="display_name" name="display_name" value="<?= htmlspecialchars($displayName) ?>" required data-tooltip="The name visible to other users.">
                     </div>
                     <div class="form-group">
                         <label for="locality">Locality</label>
-                        <input type="text" id="locality" name="locality" value="<?= htmlspecialchars($locality) ?>" placeholder="e.g. Manchester">
+                        <input type="text" id="locality" name="locality" value="<?= htmlspecialchars($locality) ?>" placeholder="e.g. Manchester" data-tooltip="Your city or region.">
                     </div>
                     <div class="form-group">
                         <label for="age_band">Age Band</label>
-                        <select id="age_band" name="age_band">
+                        <select id="age_band" name="age_band" data-tooltip="Select your age range for tailored insights.">
                             <?php foreach (['16-17', '18-24', '25-34', '35-44', '45-54', '55-64', '65-80'] as $band): ?>
                                 <option value="<?= $band ?>" <?= $ageBand === $band ? 'selected' : '' ?>><?= $band ?></option>
                             <?php endforeach; ?>
@@ -252,7 +244,7 @@ require_once __DIR__ . '/includes/sidebar.php';
                     </div>
                     <div class="form-group">
                         <label for="gender_identity">Gender Identity</label>
-                        <select id="gender_identity" name="gender_identity">
+                        <select id="gender_identity" name="gender_identity" data-tooltip="Select your gender identity.">
                             <?php foreach (['female', 'male', 'non_binary', 'prefer_not_to_say'] as $g): ?>
                                 <option value="<?= $g ?>" <?= $genderIdentity === $g ? 'selected' : '' ?>>
                                     <?= ucfirst(str_replace('_', ' ', $g)) ?>
@@ -263,9 +255,9 @@ require_once __DIR__ . '/includes/sidebar.php';
                 </div>
                 <div class="form-group">
                     <label for="bio">Bio</label>
-                    <textarea id="bio" name="bio" rows="3"><?= htmlspecialchars($bio) ?></textarea>
+                    <textarea id="bio" name="bio" rows="3" data-tooltip="A short description about yourself and your fitness goals."><?= htmlspecialchars($bio) ?></textarea>
                 </div>
-                <button type="submit" class="btn-primary btn-save">Save Profile</button>
+                <button type="submit" class="btn-primary btn-save" data-tooltip="Save your personal information changes.">Save Profile</button>
             </form>
         </div>
         <!-- Body Measurements -->
@@ -278,42 +270,42 @@ require_once __DIR__ . '/includes/sidebar.php';
                 <div class="form-grid-3">
                     <div class="form-group">
                         <label for="height_cm">Height (cm)</label>
-                        <input type="number" step="0.1" id="height_cm" name="height_cm" value="<?= $measurements['height_cm'] ?>" placeholder="175">
+                        <input type="number" step="0.1" id="height_cm" name="height_cm" value="<?= $measurements['height_cm'] ?>" placeholder="175" data-tooltip="Your height in centimetres.">
                     </div>
                     <div class="form-group">
                         <label for="weight_kg">Weight (kg)</label>
-                        <input type="number" step="0.1" id="weight_kg" name="weight_kg" value="<?= $measurements['weight_kg'] ?>" placeholder="70">
+                        <input type="number" step="0.1" id="weight_kg" name="weight_kg" value="<?= $measurements['weight_kg'] ?>" placeholder="70" data-tooltip="Your current weight in kilograms.">
                     </div>
                     <div class="form-group">
                         <label for="chest_cm">Chest (cm)</label>
-                        <input type="number" step="0.1" id="chest_cm" name="chest_cm" value="<?= $measurements['chest_cm'] ?>">
+                        <input type="number" step="0.1" id="chest_cm" name="chest_cm" value="<?= $measurements['chest_cm'] ?>" data-tooltip="Chest circumference in cm.">
                     </div>
                     <div class="form-group">
                         <label for="waist_cm">Waist (cm)</label>
-                        <input type="number" step="0.1" id="waist_cm" name="waist_cm" value="<?= $measurements['waist_cm'] ?>">
+                        <input type="number" step="0.1" id="waist_cm" name="waist_cm" value="<?= $measurements['waist_cm'] ?>" data-tooltip="Waist circumference in cm.">
                     </div>
                     <div class="form-group">
                         <label for="hips_cm">Hips (cm)</label>
-                        <input type="number" step="0.1" id="hips_cm" name="hips_cm" value="<?= $measurements['hips_cm'] ?>">
+                        <input type="number" step="0.1" id="hips_cm" name="hips_cm" value="<?= $measurements['hips_cm'] ?>" data-tooltip="Hip circumference in cm.">
                     </div>
                     <div class="form-group">
                         <label for="left_arm_cm">Left Arm (cm)</label>
-                        <input type="number" step="0.1" id="left_arm_cm" name="left_arm_cm" value="<?= $measurements['left_arm_cm'] ?>">
+                        <input type="number" step="0.1" id="left_arm_cm" name="left_arm_cm" value="<?= $measurements['left_arm_cm'] ?>" data-tooltip="Left arm circumference in cm.">
                     </div>
                     <div class="form-group">
                         <label for="right_arm_cm">Right Arm (cm)</label>
-                        <input type="number" step="0.1" id="right_arm_cm" name="right_arm_cm" value="<?= $measurements['right_arm_cm'] ?>">
+                        <input type="number" step="0.1" id="right_arm_cm" name="right_arm_cm" value="<?= $measurements['right_arm_cm'] ?>" data-tooltip="Right arm circumference in cm.">
                     </div>
                     <div class="form-group">
                         <label for="left_leg_cm">Left Leg (cm)</label>
-                        <input type="number" step="0.1" id="left_leg_cm" name="left_leg_cm" value="<?= $measurements['left_leg_cm'] ?>">
+                        <input type="number" step="0.1" id="left_leg_cm" name="left_leg_cm" value="<?= $measurements['left_leg_cm'] ?>" data-tooltip="Left leg circumference in cm.">
                     </div>
                     <div class="form-group">
                         <label for="right_leg_cm">Right Leg (cm)</label>
-                        <input type="number" step="0.1" id="right_leg_cm" name="right_leg_cm" value="<?= $measurements['right_leg_cm'] ?>">
+                        <input type="number" step="0.1" id="right_leg_cm" name="right_leg_cm" value="<?= $measurements['right_leg_cm'] ?>" data-tooltip="Right leg circumference in cm.">
                     </div>
                 </div>
-                <button type="submit" class="btn-primary btn-save">Record Measurements</button>
+                <button type="submit" class="btn-primary btn-save" data-tooltip="Record these measurements to your progress history.">Record Measurements</button>
             </form>
         </div>
     </div>
@@ -408,15 +400,15 @@ document.addEventListener('DOMContentLoaded', () => {
                     saveBtn.textContent = 'Uploading...';
                     saveBtn.disabled = true;
                     fetch('profile.php', { method: 'POST', body: formData })
-                    .then(response => {
-                        if (response.ok) window.location.reload();
-                        else throw new Error('Upload failed');
-                    })
-                    .catch(error => {
-                        alert('Network error during upload.');
-                        saveBtn.textContent = 'Apply & Upload';
-                        saveBtn.disabled = false;
-                    });
+                        .then(response => {
+                            if (response.ok) window.location.reload();
+                            else throw new Error('Upload failed');
+                        })
+                        .catch(error => {
+                            alert('Network error during upload.');
+                            saveBtn.textContent = 'Apply & Upload';
+                            saveBtn.disabled = false;
+                        });
                 }
             }, 'image/jpeg', 0.85);
         });

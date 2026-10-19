@@ -583,3 +583,26 @@ WHERE r.role_key = 'super_administrator';
 INSERT INTO tenants (tenant_name, tenant_slug) VALUES
 ('North Yorkshire Fitness', 'north-yorkshire-fitness'),
 ('West Yorkshire Fitness', 'west-yorkshire-fitness');
+
+CREATE TABLE meal_plan_items (
+    meal_plan_item_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    tenant_id BIGINT UNSIGNED NOT NULL,
+    user_id BIGINT UNSIGNED NOT NULL,
+    meal_date DATE NOT NULL,
+    meal_slot ENUM('breakfast', 'lunch', 'dinner', 'snacks') NOT NULL,
+    food_name VARCHAR(100) NOT NULL,
+    calories INT UNSIGNED NULL,
+    protein_g DECIMAL(5,1) NULL,
+    carbs_g DECIMAL(5,1) NULL,
+    fats_g DECIMAL(5,1) NULL,
+    notes VARCHAR(250) NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (meal_plan_item_id),
+    UNIQUE KEY uq_meal_slot (tenant_id, user_id, meal_date, meal_slot),
+    KEY idx_meal_plan_date (tenant_id, user_id, meal_date),
+    CONSTRAINT fk_meal_plan_membership
+        FOREIGN KEY (tenant_id, user_id)
+        REFERENCES tenant_memberships (tenant_id, user_id)
+        ON DELETE CASCADE ON UPDATE CASCADE
+) ENGINE = InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

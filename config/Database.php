@@ -18,7 +18,7 @@
  */
 declare(strict_types=1);
 
-require_once __DIR__ . '/env.php';
+//require_once __DIR__ . '/env.php';
 
 class Database {
     private static ?Database $instance = null;
@@ -29,11 +29,12 @@ class Database {
      * Enforces the Singleton pattern.
      */
     private function __construct() {
-        $host = $_ENV['DB_HOST'] ?? 'localhost';
-        $port = $_ENV['DB_PORT'] ?? '3306';
-        $dbname = $_ENV['DB_DATABASE'] ?? 'fittrack';
-        $user = $_ENV['DB_USER'] ?? 'root';
-        $pass = $_ENV['DB_PASSWORD'] ?? '';
+    // Live Arden Server Credentials
+    $host = 'localhost';
+    $port = '3306';
+    $dbname = 'k66x4ro_fittrack';
+    $user = 'k66x4ro_uni_tim';
+    $pass = 'T3chn0-2026!';
 
         $dsn = "mysql:host={$host};port={$port};dbname={$dbname};charset=utf8mb4";
 

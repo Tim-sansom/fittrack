@@ -15,12 +15,10 @@
  * Allows the SPA shell to call these charts directly.
  */
 window.runDashboardInits = function () {
-    // Guard clause: If we aren't on the dashboard, stop immediately.
     if (!document.getElementById('volumeChart') && !document.querySelector('.stat-value[data-target]')) {
         return;
     }
 
-    // Wrap in try-catch so one error doesn't break the whole page
     try { initAnimatedCounters(); } catch (e) { console.error('Counter error:', e); }
     try { initScrollAnimations(); } catch (e) { console.error('Scroll error:', e); }
     try { initBarChart(); } catch (e) { console.error('Bar chart error:', e); }
@@ -31,10 +29,6 @@ window.runDashboardInits = function () {
     try { initHeroRings(); } catch (e) { console.error('Hero ring error:', e); }
 };
 
-/**
- * MPA INITIAL LOAD
- * Handles the very first page load (MPA mode).
- */
 document.addEventListener('DOMContentLoaded', function () {
     if (typeof window.runDashboardInits === 'function') {
         window.runDashboardInits();
@@ -45,9 +39,6 @@ document.addEventListener('DOMContentLoaded', function () {
 // CHART FUNCTIONS
 // =====================================================================
 
-/**
- * Animates the numbers inside the hero rings from 0 to their target.
- */
 function initAnimatedCounters() {
     const counters = document.querySelectorAll('.stat-value[data-target]');
     if (counters.length === 0) { return; }
@@ -83,10 +74,6 @@ function animateCounter(element, target) {
     }, duration / steps);
 }
 
-/**
- * Scroll Animations
- * Fades in elements as they enter the viewport.
- */
 function initScrollAnimations() {
     const elements = document.querySelectorAll('.animate-on-scroll');
     if (elements.length === 0) { return; }
@@ -103,10 +90,6 @@ function initScrollAnimations() {
     elements.forEach(function (el) { observer.observe(el); });
 }
 
-/**
- * Bar Chart Animation
- * Staggered height animation for the activity distribution bars.
- */
 function initBarChart() {
     const bars = document.querySelectorAll('.bar[data-height]');
     if (bars.length === 0) { return; }
@@ -120,16 +103,19 @@ function initBarChart() {
     }, 400);
 }
 
-/**
- * Helper: Aggregates daily data into weekly buckets for the Year view.
- */
 function aggregateByWeek(dailyData) {
     const weeks = {};
     dailyData.forEach(function (day) {
-        const date = new Date(day.activity_date);
+        const parts = day.activity_date.split('-');
+        const date = new Date(parts[0], parts[1] - 1, parts[2]);
+        
         const dayOfWeek = date.getDay() || 7;
         date.setDate(date.getDate() - dayOfWeek + 1);
-        const weekKey = date.toISOString().split('T')[0];
+        
+        const y = date.getFullYear();
+        const m = String(date.getMonth() + 1).padStart(2, '0');
+        const d = String(date.getDate()).padStart(2, '0');
+        const weekKey = `${y}-${m}-${d}`;
         
         if (!weeks[weekKey]) {
             weeks[weekKey] = { activity_date: weekKey, session_count: 0, total_mins: 0 };
@@ -144,8 +130,7 @@ function aggregateByWeek(dailyData) {
 }
 
 /**
- * Volume Chart (Line Chart)
- * Renders the main activity progress chart using raw SVG.
+ * Volume Chart (Adaptive: Bar for Week, Line for Month/Year)
  */
 function initVolumeChart() {
     const svg = document.getElementById('volumeChart');
@@ -170,6 +155,12 @@ function initVolumeChart() {
     
     if (!line || !area || !pointsGroup || !gridGroup) { return; }
 
+    // Clear previous renders
+    line.setAttribute('d', '');
+    area.setAttribute('d', '');
+    pointsGroup.innerHTML = '';
+    gridGroup.innerHTML = '';
+
     const width = 800;
     const height = 280;
     const padding = { top: 20, right: 20, bottom: 40, left: 50 };
@@ -177,7 +168,7 @@ function initVolumeChart() {
     const chartH = height - padding.top - padding.bottom;
     
     const maxVal = Math.max.apply(null, data.map(function (d) { return parseInt(d.total_mins, 10) || 0; }));
-    const yMax = Math.ceil(maxVal / 60) * 60;
+    const yMax = Math.max(Math.ceil(maxVal / 60) * 60, 60);
     
     let gridHtml = '';
     const gridSteps = 4;
@@ -193,59 +184,117 @@ function initVolumeChart() {
         const x = padding.left + (i / Math.max(data.length - 1, 1)) * chartW;
         const mins = parseInt(d.total_mins, 10) || 0;
         const y = padding.top + chartH - (mins / yMax) * chartH;
-        return { x: x, y: y, activity_date: d.activity_date, session_count: d.session_count, numericMins: mins };
+        
+        const parts = d.activity_date.split('-');
+        const dateObj = new Date(parts[0], parts[1] - 1, parts[2]);
+        const dateLabel = dateObj.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+        
+        return { x: x, y: y, activity_date: d.activity_date, session_count: d.session_count, numericMins: mins, dateLabel: dateLabel };
     });
 
-    const pathD = points.map(function (p, i) { return (i === 0 ? 'M' : 'L') + ' ' + p.x + ' ' + p.y; }).join(' ');
-    line.setAttribute('d', pathD);
-    
-    const areaD = pathD + ' L ' + points[points.length - 1].x + ' ' + (padding.top + chartH) + ' L ' + points[0].x + ' ' + (padding.top + chartH) + ' Z';
-    area.setAttribute('d', areaD);
-
-    const showCircles = data.length <= 15;
-    if (showCircles) {
-        points.forEach(function (p) {
-            const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-            circle.setAttribute('cx', p.x);
-            circle.setAttribute('cy', p.y);
-            circle.setAttribute('r', 5);
-            circle.setAttribute('class', 'data-point');
+    // =========================================================
+    // WEEK VIEW: Render as Bar Chart
+    // =========================================================
+    if (range === 'week') {
+        line.style.display = 'none';
+        area.style.display = 'none';
+        
+        const barWidth = (chartW / data.length) * 0.5;
+        const barGap = (chartW / data.length) * 0.5;
+        
+        points.forEach(function (p, i) {
+            const barX = padding.left + (i * (barWidth + barGap)) + (barGap / 2);
+            const barHeight = Math.max(4, (padding.top + chartH) - p.y);
+            const barY = (padding.top + chartH) - barHeight;
             
-            const dateObj = new Date(p.activity_date);
-            const dateLabel = dateObj.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+            const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+            rect.setAttribute('x', barX);
+            rect.setAttribute('y', barY);
+            rect.setAttribute('width', barWidth);
+            rect.setAttribute('height', barHeight);
+            rect.setAttribute('fill', '#5D2E5D');
+            rect.setAttribute('rx', '4');
+            rect.setAttribute('ry', '4');
+            rect.style.opacity = p.numericMins === 0 ? '0.2' : '1';
+            rect.style.transition = 'height 0.6s ease, opacity 0.3s ease, fill 0.2s ease';
             
-            circle.addEventListener('mouseenter', function () {
-                tooltip.innerHTML = '<strong>' + dateLabel + '</strong><br>' + p.session_count + ' session' + (p.session_count !== 1 ? 's' : '') + '<br>' + p.numericMins + ' mins';
+            rect.addEventListener('mouseenter', function () {
+                tooltip.innerHTML = '<strong>' + p.dateLabel + '</strong><br>' + p.session_count + ' session' + (p.session_count !== 1 ? 's' : '') + '<br>' + p.numericMins + ' mins';
                 tooltip.classList.add('visible');
+                rect.setAttribute('fill', '#9F5F91');
             });
-            circle.addEventListener('mousemove', function (e) {
-                const rect = svg.getBoundingClientRect();
-                tooltip.style.left = (e.clientX - rect.left + 12) + 'px';
-                tooltip.style.top = (e.clientY - rect.top - 40) + 'px';
+            rect.addEventListener('mousemove', function (e) {
+                const rectSvg = svg.getBoundingClientRect();
+                tooltip.style.left = (e.clientX - rectSvg.left + 12) + 'px';
+                tooltip.style.top = (e.clientY - rectSvg.top - 40) + 'px';
             });
-            circle.addEventListener('mouseleave', function () {
+            rect.addEventListener('mouseleave', function () {
                 tooltip.classList.remove('visible');
+                rect.setAttribute('fill', '#5D2E5D');
             });
-            pointsGroup.appendChild(circle);
+            pointsGroup.appendChild(rect);
+            
+            // X-axis labels for bars
+            const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+            text.setAttribute('x', barX + (barWidth / 2));
+            text.setAttribute('y', height - 8);
+            text.setAttribute('text-anchor', 'middle');
+            text.setAttribute('fill', 'var(--text)');
+            text.setAttribute('font-size', '10');
+            text.setAttribute('opacity', '0.7');
+            text.textContent = p.dateLabel;
+            gridGroup.appendChild(text);
         });
-    }
+    } 
+    // =========================================================
+    // MONTH/YEAR VIEW: Render as Line Chart
+    // =========================================================
+    else {
+        line.style.display = 'block';
+        area.style.display = 'block';
+        
+        const pathD = points.map(function (p, i) { return (i === 0 ? 'M' : 'L') + ' ' + p.x + ' ' + p.y; }).join(' ');
+        line.setAttribute('d', pathD);
+        
+        const areaD = pathD + ' L ' + points[points.length - 1].x + ' ' + (padding.top + chartH) + ' L ' + points[0].x + ' ' + (padding.top + chartH) + ' Z';
+        area.setAttribute('d', areaD);
 
-    const labelInterval = data.length > 14 ? Math.ceil(data.length / 7) : 1;
-    let xLabelsHtml = '';
-    points.forEach(function (p, i) {
-        if (i % labelInterval === 0 || i === points.length - 1) {
-            const dateObj = new Date(p.activity_date);
-            const label = dateObj.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
-            xLabelsHtml += '<text x="' + p.x + '" y="' + (height - 8) + '" text-anchor="middle" fill="var(--text)" font-size="10" opacity="0.7">' + label + '</text>';
+        const showCircles = data.length <= 15;
+        if (showCircles) {
+            points.forEach(function (p) {
+                const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+                circle.setAttribute('cx', p.x);
+                circle.setAttribute('cy', p.y);
+                circle.setAttribute('r', 5);
+                circle.setAttribute('class', 'data-point');
+                
+                circle.addEventListener('mouseenter', function () {
+                    tooltip.innerHTML = '<strong>' + p.dateLabel + '</strong><br>' + p.session_count + ' session' + (p.session_count !== 1 ? 's' : '') + '<br>' + p.numericMins + ' mins';
+                    tooltip.classList.add('visible');
+                });
+                circle.addEventListener('mousemove', function (e) {
+                    const rectSvg = svg.getBoundingClientRect();
+                    tooltip.style.left = (e.clientX - rectSvg.left + 12) + 'px';
+                    tooltip.style.top = (e.clientY - rectSvg.top - 40) + 'px';
+                });
+                circle.addEventListener('mouseleave', function () {
+                    tooltip.classList.remove('visible');
+                });
+                pointsGroup.appendChild(circle);
+            });
         }
-    });
-    gridGroup.innerHTML += xLabelsHtml;
+
+        const labelInterval = data.length > 14 ? Math.ceil(data.length / 7) : 1;
+        let xLabelsHtml = '';
+        points.forEach(function (p, i) {
+            if (i % labelInterval === 0 || i === points.length - 1) {
+                xLabelsHtml += '<text x="' + p.x + '" y="' + (height - 8) + '" text-anchor="middle" fill="var(--text)" font-size="10" opacity="0.7">' + p.dateLabel + '</text>';
+            }
+        });
+        gridGroup.innerHTML += xLabelsHtml;
+    }
 }
 
-/**
- * Weight Sparkline
- * Renders the small weight trend chart.
- */
 function initWeightSparkline() {
     const svg = document.getElementById('weightChart');
     if (!svg) { return; }
@@ -286,10 +335,6 @@ function initWeightSparkline() {
     });
 }
 
-/**
- * Donut Rings Animation
- * Animates the calorie intake/burn rings.
- */
 function initDonutRings() {
     const rings = document.querySelectorAll('.donut-intake, .donut-burn');
     if (rings.length === 0) { return; }
@@ -312,9 +357,6 @@ function initDonutRings() {
     });
 }
 
-/**
- * Progress Bars Animation
- */
 function initProgressBars() {
     const bars = document.querySelectorAll('.progress-fill[data-width]');
     if (bars.length === 0) { return; }
@@ -333,16 +375,10 @@ function initProgressBars() {
     bars.forEach(function (bar) { observer.observe(bar); });
 }
 
-/**
- * Apple Watch-style Hero Ring Animation
- * Animates the rings from 0 (offset 100) to their target values.
- */
 function initHeroRings() {
     const rings = document.querySelectorAll('.ring-fill');
     if (rings.length === 0) { return; }
 
-    // Small delay to ensure the browser has rendered the initial state (offset=100)
-    // before we apply the target offset, triggering the CSS transition.
     setTimeout(function () {
         rings.forEach(function (ring) {
             const target = ring.getAttribute('data-target');

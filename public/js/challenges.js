@@ -6,30 +6,29 @@
  * Location: /public/js/challenges.js
  *
  * Purpose:
- * Manages the Challenges page UI: Heatmap generation, Tab switching,
- * Async form submission, and dynamic challenge rendering.
+ * Manages the Challenges page UI: GitHub-style heatmap generation,
+ * tab switching, async form submission, and dynamic challenge rendering.
  *
  * Architectural Role:
  * Demonstrates advanced client-side data visualisation and state management.
- * Satisfies the "independent contribution" criteria by building complex UI
- * components from scratch using pure mathematics and DOM APIs.
+ * The heatmap uses column-major ordering (week-by-week, Mon-Sun) to match
+ * GitHub's contribution graph layout.
  *
  * Guard Clause:
  * All initialisation functions check for the existence of their required
  * DOM elements before running. This prevents errors when the script loads
  * on non-challenges pages (including the SPA shell).
  */
+
 document.addEventListener('DOMContentLoaded', function () {
-    /**
+    /*
      * Page Detection Guard
      * Only initialise challenge functionality when the challenges page
-     * elements are present in the DOM. This prevents the script from
-     * running on the SPA shell or other pages.
+     * elements are present in the DOM.
      */
     const challengePageIndicator = document.getElementById('heatmapGrid')
         || document.getElementById('challengeList')
         || document.getElementById('challengeModal');
-
     if (!challengePageIndicator) {
         return;
     }
@@ -41,8 +40,8 @@ document.addEventListener('DOMContentLoaded', function () {
 });
 
 /* =========================================
-1. HEATMAP GENERATOR
-========================================= */
+   1. HEATMAP GENERATOR (GitHub-style)
+   ========================================= */
 function initHeatmap() {
     const grid = document.getElementById('heatmapGrid');
     if (!grid) {
@@ -56,32 +55,58 @@ function initHeatmap() {
     }
 
     const today = new Date();
-    const daysToShow = 365;
+    const daysToShow = 364; // 52 weeks × 7 days = 364 days
+
+    // Find the counts to determine intensity levels
     const counts = Object.values(activityData);
     const maxCount = Math.max(...counts, 1);
 
-    for (let i = daysToShow; i >= 0; i--) {
-        const date = new Date(today);
-        date.setDate(date.getDate() - i);
-        const dateStr = date.toISOString().split('T')[0];
-        const count = activityData[dateStr] || 0;
+    // GitHub heatmap renders column-by-column (week by week), not row-by-row.
+    // Each column is a week (Sunday to Saturday), each row is a day of week.
+    // We need to calculate the start date as 52 weeks ago, aligned to Sunday.
+    const startDate = new Date(today);
+    startDate.setDate(startDate.getDate() - daysToShow);
 
-        let level = 0;
-        if (count > 0) { level = 1; }
-        if (count > maxCount * 0.25) { level = 2; }
-        if (count > maxCount * 0.50) { level = 3; }
-        if (count > maxCount * 0.75) { level = 4; }
+    // Align to Sunday (day 0)
+    while (startDate.getDay() !== 0) {
+        startDate.setDate(startDate.getDate() - 1);
+    }
 
-        const cell = document.createElement('div');
-        cell.className = 'heatmap-day level-' + level;
-        cell.title = date.toLocaleDateString('en-GB') + ': ' + count + ' activities';
-        grid.appendChild(cell);
+    // Generate 52 weeks × 7 days = 364 cells
+    for (let week = 0; week < 52; week++) {
+        for (let day = 0; day < 7; day++) {
+            const cellDate = new Date(startDate);
+            cellDate.setDate(startDate.getDate() + (week * 7) + day);
+
+            // Skip future dates
+            if (cellDate > today) {
+                const emptyCell = document.createElement('div');
+                emptyCell.className = 'heatmap-day level-0';
+                emptyCell.style.visibility = 'hidden';
+                grid.appendChild(emptyCell);
+                continue;
+            }
+
+            const dateStr = cellDate.toISOString().split('T')[0];
+            const count = activityData[dateStr] || 0;
+
+            let level = 0;
+            if (count > 0) { level = 1; }
+            if (count > maxCount * 0.25) { level = 2; }
+            if (count > maxCount * 0.50) { level = 3; }
+            if (count > maxCount * 0.75) { level = 4; }
+
+            const cell = document.createElement('div');
+            cell.className = 'heatmap-day level-' + level;
+            cell.title = cellDate.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) + ': ' + count + ' activities';
+            grid.appendChild(cell);
+        }
     }
 }
 
 /* =========================================
-2. TABS & DATA FETCHING
-========================================= */
+   2. TABS & DATA FETCHING
+   ========================================= */
 function initTabs() {
     const tabs = document.querySelectorAll('.tab-btn');
     if (tabs.length === 0) {
@@ -107,7 +132,7 @@ function loadChallenges(status) {
 
     container.innerHTML = '<div class="empty-state">Loading...</div>';
 
-    fetch('/api/challenges.php?status=' + status)
+    fetch('api/challenges.php?status=' + status)
         .then(function (res) {
             return res.json();
         })
@@ -155,8 +180,8 @@ function renderChallenges(challenges, container) {
 }
 
 /* =========================================
-3. MODAL & FORM SUBMISSION
-========================================= */
+   3. MODAL & FORM SUBMISSION
+   ========================================= */
 function initModal() {
     const modal = document.getElementById('challengeModal');
     const openBtn = document.getElementById('openChallengeModal');
@@ -196,7 +221,7 @@ function initModal() {
             const formData = new FormData(form);
             const payload = Object.fromEntries(formData.entries());
 
-            fetch('/api/challenges.php', {
+            fetch('api/challenges.php', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(payload)
@@ -227,8 +252,8 @@ function initModal() {
 }
 
 /* =========================================
-UTILITY
-========================================= */
+   UTILITY
+   ========================================= */
 function escapeHtml(text) {
     if (typeof text !== 'string') {
         return '';

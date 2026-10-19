@@ -1,6 +1,5 @@
 <?php
 declare(strict_types=1);
-
 /**
  * File: login.php
  * Location: /public/login.php
@@ -16,10 +15,8 @@ declare(strict_types=1);
  * - Returns generic error messages to prevent user enumeration attacks.
  * - Honeypot field traps automated bots without affecting human UX.
  */
-
 require_once __DIR__ . '/../config/Session.php';
 require_once __DIR__ . '/../src/models/User.php';
-
 Session::start();
 
 // Redirect authenticated users away from the login page.
@@ -61,12 +58,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $error = 'Please enter both email and password.';
     } else {
         // 4. Attempt Authentication via Model.
-        $userModel = new User();
+        $userModel = new UserModel();
         $user = $userModel->authenticate($email, $password);
         
         if ($user) {
             // 5. Regenerate session ID to prevent session fixation attacks.
-            Session::regenerate();
+            session_regenerate_id(true);
             
             // 6. Store user context in session for subsequent requests.
             $_SESSION['user_id'] = $user['user_id'];
@@ -90,11 +87,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Login | FitTrack</title>
-    <link rel="stylesheet" href="/css/dashboard.css">
-    <link rel="icon" type="image/png" href="/favicon.png">
+    <link rel="stylesheet" href="css/dashboard.css">
+    <link rel="icon" type="image/png" href="favicon.png">
 </head>
 <body class="auth-page">
-    <!-- Added <main> landmark for accessibility -->
     <main role="main" class="login-split-container">
         <!-- Left Side: Visual/Branding -->
         <div class="login-visual">
@@ -125,26 +121,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     
                     <div class="form-group">
                         <label for="email">Email Address</label>
-                        <input type="email" id="email" name="email" required autocomplete="email" autofocus placeholder="name@example.com">
+                        <input type="email" id="email" name="email" required autocomplete="email" autofocus placeholder="name@example.com" data-tooltip="Enter your registered email address">
                     </div>
                     
                     <div class="form-group">
                         <label for="password">Password</label>
-                        <input type="password" id="password" name="password" required autocomplete="current-password" placeholder="••••••••">
+                        <input type="password" id="password" name="password" required autocomplete="current-password" placeholder="••••••••" data-tooltip="Enter your secure password">
                     </div>
                     
                     <div class="login-options">
-                        <label class="remember-me" style="color: #2D1B2E !important; font-weight: 700;">
+                        <label class="remember-me" data-tooltip="Keep me signed in on this device">
                             <input type="checkbox" name="remember"> Remember me
                         </label>
-                        <a href="/forgot-password.php" class="forgot-link" style="color: #2D1B2E !important; font-weight: 700; text-decoration: none;">Forgot password?</a>
+                        <a href="forgot-password.php" class="forgot-link" data-tooltip="Reset your password via email">Forgot password?</a>
                     </div>
                     
-                    <button type="submit" class="btn-primary" style="width: 100%; background-color: #5D2E5D !important;">Sign In</button>
+                    <button type="submit" class="btn-primary" style="width: 100%;" data-tooltip="Sign in to your FitTrack account">Sign In</button>
                 </form>
                 
                 <div class="login-footer">
-                    Don't have an account? <a href="register.php">Register here</a>
+                    Don't have an account? <a href="register.php" data-tooltip="Create a new FitTrack account">Register here</a>
                 </div>
             </div>
         </div>

@@ -10,20 +10,23 @@
  */
 
 // 1. Connect to Database
-// Adjust this path if your config folder is located differently relative to this script
 require_once __DIR__ . '/../config/Database.php'; 
 
 try {
     $db = Database::getInstance()->getConnection();
 } catch (Exception $e) {
-    // If DB fails, log it and exit. Cron will try again next day.
     error_log("FitTrack Cron: DB Connection failed - " . $e->getMessage());
     exit(1);
 }
 
-// 2. Find the Demonstration User
-// We look for 'fit_user_001' specifically.
-$stmt = $db->prepare("SELECT user_id, tenant_id FROM users WHERE username = 'fit_user_001' LIMIT 1");
+// 2. Find the Demonstration User AND their Tenant (FIXED: JOIN tenant_memberships)
+$stmt = $db->prepare("
+    SELECT u.user_id, tm.tenant_id 
+    FROM users u 
+    JOIN tenant_memberships tm ON u.user_id = tm.user_id 
+    WHERE u.username = 'fit_user_001' 
+    LIMIT 1
+");
 $stmt->execute();
 $user = $stmt->fetch(PDO::FETCH_ASSOC);
 
@@ -38,20 +41,17 @@ $tenantId = (int)$user['tenant_id'];
 echo "Starting seed for User ID: $userId (Tenant: $tenantId)\n";
 
 // 3. Determine what data is missing
-// We check the latest activity date. If it's old, we fill the gap up to yesterday.
 $stmt = $db->prepare("SELECT MAX(activity_date) as last_date FROM activity_logs WHERE user_id = :uid");
 $stmt->execute(['uid' => $userId]);
 $lastDateStr = $stmt->fetchColumn();
 
 if ($lastDateStr) {
     $startDate = new DateTime($lastDateStr);
-    $startDate->modify('+1 day'); // Start filling from the day after the last record
+    $startDate->modify('+1 day');
 } else {
-    // If no data exists at all, start 90 days ago
     $startDate = new DateTime('-90 days');
 }
 
-// We fill up to yesterday. We leave today blank so the marker sees a "fresh" day.
 $endDate = new DateTime('-1 day');
 
 if ($startDate > $endDate) {
@@ -70,14 +70,11 @@ $daysSeeded = 0;
 
 while ($currentDate <= $endDate) {
     $dateString = $currentDate->format('Y-m-d');
-    $dayOfWeek = (int)$currentDate->format('N'); // 1 (Mon) to 7 (Sun)
+    $dayOfWeek = (int)$currentDate->format('N');
     $isWeekend = $dayOfWeek >= 6;
 
     // --- A. Seed Activity Log ---
-    // 70% chance on weekdays, 40% on weekends
     if (mt_rand(1, 100) / 100 <= ($isWeekend ? 0.4 : 0.7)) {
-        
-        // Randomly select activity type
         $rand = mt_rand(1, 100);
         if ($rand <= 40) $slug = 'gym';
         elseif ($rand <= 70) $slug = 'running';
@@ -87,7 +84,6 @@ while ($currentDate <= $endDate) {
         $typeId = $activityTypes[$slug] ?? null;
 
         if ($typeId) {
-            // Generate realistic data based on type
             if ($slug === 'gym') {
                 $duration = mt_rand(45, 75); $distance = null;
                 $title = ['Upper Body Push', 'Leg Day', 'Pull & Core', 'Full Body Circuit'][mt_rand(0, 3)];
@@ -101,9 +97,6 @@ while ($currentDate <= $endDate) {
                 $duration = mt_rand(30, 60); $distance = null; $title = 'Pool Laps';
             }
 
-            // Insert Activity (Idempotent: The date loop ensures we don't duplicate days easily, 
-            // but in a real app we'd check existence first. For this cron, the date loop is usually enough 
-            // if we only run it once a day).
             $db->prepare("
                 INSERT INTO activity_logs 
                 (tenant_id, user_id, activity_type_id, activity_date, title, duration_minutes, distance_km, visibility, created_at)
@@ -116,7 +109,6 @@ while ($currentDate <= $endDate) {
     }
 
     // --- B. Seed Daily Nutrition ---
-    // Check if nutrition exists for this date to prevent duplicates
     $nutCheck = $db->prepare("SELECT log_date FROM daily_nutrition WHERE user_id = :uid AND log_date = :date LIMIT 1");
     $nutCheck->execute(['uid' => $userId, 'date' => $dateString]);
     
@@ -146,13 +138,13 @@ while ($currentDate <= $endDate) {
         $measCheck->execute(['uid' => $userId, 'date' => $dateString]);
         
         if (!$measCheck->fetch()) {
-            // Realistic weight loss trend: 72.0kg -> 70.6kg over 12 weeks
             $daysSinceStart = $currentDate->diff(new DateTime('-90 days'))->days;
             $weeksPassed = $daysSinceStart / 7;
             $baseWeight = 72.0 - ($weeksPassed * 0.12); 
             $weight = round($baseWeight + (mt_rand(-2, 2) / 10), 1);
             $bmi = round($weight / (1.75 * 1.75), 1);
 
+            // FIXED: Removed tenant_id as it does not exist in the user_measurements schema
             $db->prepare("
                 INSERT INTO user_measurements 
                 (user_id, weight_kg, bmi, chest_cm, waist_cm, hips_cm, left_arm_cm, right_arm_cm, left_leg_cm, right_leg_cm, recorded_at)

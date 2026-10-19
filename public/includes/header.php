@@ -11,11 +11,34 @@
  * Architectural Role:
  * Sits in grid-row 1, spanning both columns of the app grid layout.
  * Performs lightweight, scoped SQL queries to populate header widgets.
+ *
+ * Security:
+ * - Session timeout enforced server-side on every page load.
+ * - All user output escaped with htmlspecialchars().
  */
 declare(strict_types=1);
 if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
+
+// =====================================================================
+// SESSION TIMEOUT CHECK (Server-Side)
+// Redirects to login if inactive for 30 minutes.
+// =====================================================================
+$sessionTimeout = 1800; // 30 minutes in seconds
+if (isset($_SESSION['user_id']) && isset($_SESSION['last_activity'])) {
+    if (time() - $_SESSION['last_activity'] > $sessionTimeout) {
+        session_unset();
+        session_destroy();
+        if (!headers_sent()) {
+            header('Location: login.php?timeout=1');
+            exit;
+        }
+    }
+    // Update last activity time on every page load
+    $_SESSION['last_activity'] = time();
+}
+
 $username = $_SESSION['username'] ?? 'User';
 $initials = strtoupper(substr(str_replace(' ', '', $username), 0, 2));
 $userId = (int)($_SESSION['user_id'] ?? 0);
@@ -23,8 +46,7 @@ $tenantId = (int)($_SESSION['tenant_id'] ?? 0);
 
 // =====================================================================
 // MULTI-TENANT SAFETY NET
-// If the session is missing the tenant_id, fetch it from the database.
-// This ensures the app works for hundreds of tenants without hardcoding.
+// Recovers tenant_id from DB if lost from session.
 // =====================================================================
 if ($userId > 0 && empty($tenantId)) {
     try {
@@ -46,7 +68,6 @@ if ($userId > 0 && empty($tenantId)) {
     }
 }
 
-// Fetch avatar path if available
 $avatarPath = null;
 $notifications = [];
 $upcomingEvents = [];
@@ -110,11 +131,14 @@ $initialDateTime = date('D j M, H:i');
 <!DOCTYPE html>
 <html lang="en-GB" data-theme="light">
 <head>
+    <!-- SILVER BULLET: Forces all relative URLs to resolve from your project folder -->
+    <base href="/COM6011/public/">
+    
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title><?= isset($pageTitle) ? htmlspecialchars($pageTitle) . ' | ' : '' ?>FitTrack</title>
-    <link rel="stylesheet" href="/css/dashboard.css">
-    <link rel="icon" type="image/png" href="/favicon.png">
+    <link rel="stylesheet" href="css/dashboard.css">
+    <link rel="icon" type="image/png" href="favicon.png">
 </head>
 <body>
 <div class="app-grid-layout">
@@ -139,8 +163,7 @@ $initialDateTime = date('D j M, H:i');
                 <div class="spa-toggle-container">
                     <span class="toggle-label <?= (($_SESSION['spa_mode'] ?? 'mpa') === 'mpa') ? 'active' : '' ?>" id="mpaLabel">MPA</span>
                     <label class="switch" for="spaModeToggle">
-                        <span class="sr-only">Toggle SPA/MPA mode</span>
-                        <input type="checkbox" id="spaModeToggle" aria-label="Toggle SPA/MPA mode" <?= (($_SESSION['spa_mode'] ?? 'mpa') === 'spa') ? 'checked' : '' ?>>
+                        <input type="checkbox" id="spaModeToggle" <?= (($_SESSION['spa_mode'] ?? 'mpa') === 'spa') ? 'checked' : '' ?>>
                         <span class="slider round"></span>
                     </label>
                     <span class="toggle-label <?= (($_SESSION['spa_mode'] ?? 'mpa') === 'spa') ? 'active' : '' ?>" id="spaLabel">SPA</span>
@@ -148,7 +171,7 @@ $initialDateTime = date('D j M, H:i');
 
                 <!-- Notifications Dropdown (Message Icon) -->
                 <div class="dropdown-container">
-                    <button class="icon-btn dropdown-trigger" id="notifTrigger" aria-label="Notifications" title="Notifications">
+                    <button class="icon-btn dropdown-trigger" id="notifTrigger" aria-label="Notifications" title="Notifications" data-tooltip="View recent kudos and notifications">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                             <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
                         </svg>
@@ -176,13 +199,13 @@ $initialDateTime = date('D j M, H:i');
                                 <?php endforeach; ?>
                             <?php endif; ?>
                         </div>
-                        <a href="/community.php" class="dropdown-footer">View Community</a>
+                        <a href="community.php" class="dropdown-footer">View Community</a>
                     </div>
                 </div>
 
                 <!-- Calendar Dropdown -->
                 <div class="dropdown-container">
-                    <button class="icon-btn dropdown-trigger" id="calTrigger" aria-label="Calendar" title="Upcoming Plans">
+                    <button class="icon-btn dropdown-trigger" id="calTrigger" aria-label="Calendar" title="Upcoming Plans" data-tooltip="View upcoming planned activities">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                             <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
                             <line x1="16" y1="2" x2="16" y2="6"></line>
@@ -213,12 +236,12 @@ $initialDateTime = date('D j M, H:i');
                                 <?php endforeach; ?>
                             <?php endif; ?>
                         </div>
-                        <a href="/workouts.php" class="dropdown-footer">View Workouts</a>
+                        <a href="workouts.php" class="dropdown-footer">View Workouts</a>
                     </div>
                 </div>
 
                 <!-- Theme Toggle -->
-                <button class="icon-btn" id="themeToggle" aria-label="Toggle dark mode" title="Toggle theme">
+                <button class="icon-btn" id="themeToggle" aria-label="Toggle dark mode" title="Toggle theme" data-tooltip="Toggle between light and dark mode">
                     <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <circle cx="12" cy="12" r="5"/>
                         <line x1="12" y1="1" x2="12" y2="3"></line>
@@ -237,13 +260,91 @@ $initialDateTime = date('D j M, H:i');
             </div>
 
             <!-- User Profile Pill -->
-            <a href="/profile.php" class="user-profile-pill" title="View profile">
-                <?php if ($avatarPath): ?>
-                    <img src="<?= htmlspecialchars($avatarPath) ?>" alt="Avatar" class="avatar-circle avatar-img">
+            <a href="profile.php" class="user-profile-pill" title="View profile" data-tooltip="View and edit your profile">
+                <?php 
+                // Strip leading slash so the <base> tag resolves the path correctly
+                $cleanAvatarPath = $avatarPath ? ltrim($avatarPath, '/') : null;
+                
+                // Check if the file physically exists on the server to prevent broken image icons
+                $fileExists = $cleanAvatarPath && file_exists(__DIR__ . '/../' . $cleanAvatarPath);
+                ?>
+                
+                <?php if ($fileExists): ?>
+                    <img src="<?= htmlspecialchars($cleanAvatarPath) ?>" alt="Avatar" class="avatar-circle avatar-img">
                 <?php else: ?>
                     <div class="avatar-circle"><?= htmlspecialchars($initials) ?></div>
                 <?php endif; ?>
+                
                 <span class="user-display-name"><?= htmlspecialchars($username) ?></span>
             </a>
         </div>
     </header>
+
+    <!-- SPA/MPA Toggle Logic (FIXED: Syncs labels with toggle state) -->
+    <script>
+    document.addEventListener('DOMContentLoaded', function() {
+        const toggle = document.getElementById('spaModeToggle');
+        const mpaLabel = document.getElementById('mpaLabel');
+        const spaLabel = document.getElementById('spaLabel');
+        
+        if (toggle) {
+            // Get current mode from session
+            const currentMode = '<?= htmlspecialchars($_SESSION['spa_mode'] ?? 'mpa') ?>';
+            
+            // Set toggle state to match session
+            toggle.checked = currentMode === 'spa';
+            
+            // Sync label highlights with toggle state
+            if (currentMode === 'spa') {
+                mpaLabel.classList.remove('active');
+                spaLabel.classList.add('active');
+            } else {
+                mpaLabel.classList.add('active');
+                spaLabel.classList.remove('active');
+            }
+
+            toggle.addEventListener('change', function() {
+                const currentPage = '<?= htmlspecialchars($currentPage ?? 'dashboard') ?>';
+                
+                if (this.checked) {
+                    // Switching to SPA Mode: update labels and redirect
+                    mpaLabel.classList.remove('active');
+                    spaLabel.classList.add('active');
+                    window.location.href = 'spa/index.php?page=' + currentPage;
+                } else {
+                    // Switching to MPA Mode: update labels and redirect
+                    mpaLabel.classList.add('active');
+                    spaLabel.classList.remove('active');
+                    window.location.href = currentPage + '.php';
+                }
+            });
+        }
+    });
+    </script>
+
+    <!-- Client-side Session Timeout Checker -->
+    <script>
+    (function() {
+        const sessionTimeout = 1800000; // 30 minutes in milliseconds
+        const checkInterval = 60000; // Check every minute
+        
+        let lastActivity = Date.now();
+        
+        // Track user activity to reset the timer
+        function updateActivity() {
+            lastActivity = Date.now();
+        }
+        
+        // Listen for user activity
+        ['click', 'keypress', 'scroll', 'mousemove', 'touchstart'].forEach(function(event) {
+            document.addEventListener(event, updateActivity, true);
+        });
+        
+        // Check for session timeout periodically
+        setInterval(function() {
+            if (Date.now() - lastActivity > sessionTimeout) {
+                window.location.href = 'login.php?timeout=1';
+            }
+        }, checkInterval);
+    })();
+    </script>

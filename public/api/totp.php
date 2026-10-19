@@ -44,7 +44,6 @@ define('TOTP_ENCRYPTION_KEY', hash('sha256', 'fittrack_totp_key_' . $tenantId, t
 
 /**
  * Base32 encoding for TOTP secret (RFC 4648).
- * TOTP secrets must be base32-encoded for authenticator app compatibility.
  */
 function base32_encode(string $data): string {
     $alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
@@ -63,7 +62,6 @@ function base32_encode(string $data): string {
 
 /**
  * Encrypts TOTP secret before database storage.
- * Uses AES-256-CBC with random IV for each encryption.
  */
 function encrypt_secret(string $secret): string {
     $iv = openssl_random_pseudo_bytes(16);
@@ -82,10 +80,8 @@ function decrypt_secret(string $encrypted): string {
 
 /**
  * Generates a TOTP code for a given secret and time step.
- * Implements RFC 6238: TOTP = HOTP(K, T) where T = floor(current_unix_time / 30)
  */
 function generate_totp_code(string $secret, int $time_step = 0): string {
-    // Base32 decode the secret
     $alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
     $binary = '';
     for ($i = 0; $i < strlen($secret); $i++) {
@@ -102,14 +98,10 @@ function generate_totp_code(string $secret, int $time_step = 0): string {
         }
     }
     
-    // Calculate time step (30-second intervals)
     $time = floor(microtime(true) / 30) + $time_step;
     $time_bytes = pack('N*', 0) . pack('N*', $time);
-    
-    // HMAC-SHA1
     $hash = hash_hmac('sha1', $time_bytes, $secret_bytes, true);
     
-    // Dynamic truncation (RFC 4226 Section 5.3)
     $offset = ord($hash[19]) & 0x0f;
     $code = (
         ((ord($hash[$offset]) & 0x7f) << 24) |
@@ -123,7 +115,6 @@ function generate_totp_code(string $secret, int $time_step = 0): string {
 
 /**
  * Generates 8 single-use recovery codes.
- * These allow account access if the authenticator device is lost.
  */
 function generate_recovery_codes(): array {
     $codes = [];
@@ -149,18 +140,16 @@ if ($method === 'GET') {
     exit;
 }
 
-// POST: Setup actions (generate secret, verify code, enable, disable)
+// POST: Setup actions
 if ($method === 'POST') {
     $input = json_decode(file_get_contents('php://input'), true);
     $action = $input['action'] ?? '';
     
     switch ($action) {
         case 'generate_secret':
-            // Generate a new 160-bit random secret
             $secret = base32_encode(openssl_random_pseudo_bytes(20));
             $encrypted = encrypt_secret($secret);
             
-            // Store with setup_started_at but not yet enabled
             $stmt = $db->prepare("
                 INSERT INTO user_totp (tenant_id, user_id, secret_encrypted, is_enabled, setup_started_at)
                 VALUES (:tid, :uid, :secret, FALSE, NOW())
@@ -172,7 +161,6 @@ if ($method === 'POST') {
                 'secret' => $encrypted, 'secret2' => $encrypted
             ]);
             
-            // Generate otpauth:// URI for authenticator apps
             $accountName = urlencode($_SESSION['username'] ?? 'user');
             $issuer = urlencode('FitTrack');
             $otpauth_uri = "otpauth://totp/{$issuer}:{$accountName}?secret={$secret}&issuer={$issuer}&algorithm=SHA1&digits=6&period=30";
@@ -190,7 +178,15 @@ if ($method === 'POST') {
                 exit(json_encode(['success' => false, 'error' => 'Invalid code format']));
             }
             
-            // Fetch stored secret
+            // Check lockout status first
+            $statusStmt = $db->prepare("SELECT failed_attempts, locked_until FROM user_totp WHERE tenant_id = :tid AND user_id = :uid");
+            $statusStmt->execute(['tid' => $tenantId, 'uid' => $userId]);
+            $status = $statusStmt->fetch(PDO::FETCH_ASSOC);
+            
+            if ($status && $status['locked_until'] && new DateTime($status['locked_until']) > new DateTime()) {
+                exit(json_encode(['success' => false, 'error' => 'Account temporarily locked due to too many failed attempts.']));
+            }
+
             $stmt = $db->prepare("SELECT secret_encrypted FROM user_totp WHERE tenant_id = :tid AND user_id = :uid");
             $stmt->execute(['tid' => $tenantId, 'uid' => $userId]);
             $row = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -201,7 +197,6 @@ if ($method === 'POST') {
             
             $secret = decrypt_secret($row['secret_encrypted']);
             
-            // Verify with ±1 time step tolerance for clock skew
             $valid = false;
             for ($offset = -1; $offset <= 1; $offset++) {
                 if (generate_totp_code($secret, $offset) === $code) {
@@ -211,26 +206,42 @@ if ($method === 'POST') {
             }
             
             if (!$valid) {
-                // Increment failed attempts
-                $db->prepare("UPDATE user_totp SET failed_attempts = failed_attempts + 1 WHERE tenant_id = :tid AND user_id = :uid")
-                   ->execute(['tid' => $tenantId, 'uid' => $userId]);
+                // ENHANCED: Implement actual lockout logic
+                $newAttempts = ($status['failed_attempts'] ?? 0) + 1;
+                if ($newAttempts >= 5) {
+                    $lockUntil = date('Y-m-d H:i:s', strtotime('+15 minutes'));
+                    $db->prepare("UPDATE user_totp SET failed_attempts = :attempts, locked_until = :locked WHERE tenant_id = :tid AND user_id = :uid")
+                       ->execute(['attempts' => $newAttempts, 'locked' => $lockUntil, 'tid' => $tenantId, 'uid' => $userId]);
+                } else {
+                    $db->prepare("UPDATE user_totp SET failed_attempts = :attempts WHERE tenant_id = :tid AND user_id = :uid")
+                       ->execute(['attempts' => $newAttempts, 'tid' => $tenantId, 'uid' => $userId]);
+                }
                 exit(json_encode(['success' => false, 'error' => 'Invalid code']));
             }
             
             // Enable TOTP and generate recovery codes
             $recovery_codes = generate_recovery_codes();
-            $recovery_json = json_encode($recovery_codes);
             
+            // FIXED: Update user_totp without the non-existent recovery_codes_encrypted column
             $stmt = $db->prepare("
                 UPDATE user_totp 
-                SET is_enabled = TRUE, enabled_at = NOW(), failed_attempts = 0,
-                    recovery_codes_encrypted = :recovery
+                SET is_enabled = TRUE, enabled_at = NOW(), failed_attempts = 0, locked_until = NULL
                 WHERE tenant_id = :tid AND user_id = :uid
             ");
-            $stmt->execute([
-                'tid' => $tenantId, 'uid' => $userId,
-                'recovery' => encrypt_secret($recovery_json)
-            ]);
+            $stmt->execute(['tid' => $tenantId, 'uid' => $userId]);
+            
+            // FIXED: Insert recovery codes into the dedicated recovery_codes table
+            $insertCodeStmt = $db->prepare("
+                INSERT INTO recovery_codes (tenant_id, user_id, code_hash)
+                VALUES (:tid, :uid, :hash)
+            ");
+            foreach ($recovery_codes as $code) {
+                $insertCodeStmt->execute([
+                    'tid' => $tenantId,
+                    'uid' => $userId,
+                    'hash' => password_hash($code, PASSWORD_DEFAULT)
+                ]);
+            }
             
             echo json_encode([
                 'success' => true,
@@ -239,9 +250,14 @@ if ($method === 'POST') {
             exit;
             
         case 'disable':
+            // FIXED: Delete from the dedicated recovery_codes table
+            $db->prepare("DELETE FROM recovery_codes WHERE tenant_id = :tid AND user_id = :uid")
+               ->execute(['tid' => $tenantId, 'uid' => $userId]);
+               
+            // FIXED: Removed reference to non-existent recovery_codes_encrypted column
             $stmt = $db->prepare("
                 UPDATE user_totp 
-                SET is_enabled = FALSE, enabled_at = NULL, secret_encrypted = '', recovery_codes_encrypted = ''
+                SET is_enabled = FALSE, enabled_at = NULL, secret_encrypted = ''
                 WHERE tenant_id = :tid AND user_id = :uid
             ");
             $stmt->execute(['tid' => $tenantId, 'uid' => $userId]);

@@ -22,10 +22,24 @@ require_once __DIR__ . '/../config/Session.php';
 require_once __DIR__ . '/../config/Database.php';
 Session::start();
 
+// Explicitly set SPA mode to MPA so the header toggle renders correctly
+$_SESSION['spa_mode'] = 'mpa';
+
+// Security: Ensure user is authenticated before rendering any dashboard data.
 if (!isset($_SESSION['user_id'])) {
     header('Location: login.php');
     exit;
 }
+
+// Session Timeout Logic: Destroy session if inactive for 30 minutes.
+$timeout = 1800; // 30 minutes in seconds
+if (isset($_SESSION['last_activity']) && (time() - $_SESSION['last_activity'] > $timeout)) {
+    session_unset();
+    session_destroy();
+    header('Location: login.php?timeout=1');
+    exit;
+}
+$_SESSION['last_activity'] = time();
 
 $db = Database::getInstance()->getConnection();
 $userId = (int)$_SESSION['user_id'];
@@ -33,14 +47,17 @@ $tenantId = (int)$_SESSION['tenant_id'];
 $pageTitle = 'Dashboard';
 $currentPage = 'dashboard';
 
-/* Time-range validation */
+/*
+ * Time-range validation.
+ * Security: Strict allowlist prevents SQL injection via $_GET['range'].
+ */
 $validRanges = ['week', 'month', 'year'];
 $range = in_array($_GET['range'] ?? '', $validRanges, true) ? $_GET['range'] : 'week';
 
 switch ($range) {
-    case 'month': $daysBack = 30; $periodLabel = 'Last 30 Days'; break;
-    case 'year': $daysBack = 365; $periodLabel = 'Last 12 Months'; break;
-    default: $daysBack = 7; $periodLabel = 'This Week';
+    case 'month': $daysBack = 30;  $periodLabel = 'Last 30 Days'; break;
+    case 'year':  $daysBack = 365; $periodLabel = 'Last 12 Months'; break;
+    default:      $daysBack = 7;   $periodLabel = 'This Week';
 }
 
 /* QUERY 1: Hero Stats (Total Workouts & Minutes) */
@@ -49,10 +66,9 @@ $weekStmt->execute(['uid' => $userId, 'tid' => $tenantId]);
 $weekData = $weekStmt->fetch(PDO::FETCH_ASSOC) ?: ['workout_count' => 0, 'total_minutes' => 0];
 
 /* QUERY 2: Activity Breakdown for 3-Ring Chart */
-// We need to categorize activities to fill the concentric rings
 $breakdownStmt = $db->prepare("
-    SELECT at.category, COUNT(*) as count 
-    FROM activity_logs al 
+    SELECT at.category, COUNT(*) as count
+    FROM activity_logs al
     JOIN activity_types at ON al.activity_type_id = at.activity_type_id AND al.tenant_id = at.tenant_id
     WHERE al.user_id = :uid AND al.tenant_id = :tid AND al.activity_date >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)
     GROUP BY at.category
@@ -60,16 +76,9 @@ $breakdownStmt = $db->prepare("
 $breakdownStmt->execute(['uid' => $userId, 'tid' => $tenantId]);
 $breakdownData = $breakdownStmt->fetchAll(PDO::FETCH_KEY_PAIR);
 
-// Calculate counts for specific rings
-// Outer Ring: Total Workouts (Goal: 5)
-// Middle Ring: Strength/Gym (Goal: 2)
-// Inner Ring: Cardio (Goal: 3)
 $totalWorkouts = (int)$weekData['workout_count'];
 $gymCount = (int)($breakdownData['strength'] ?? 0);
 $cardioCount = (int)($breakdownData['cardio'] ?? 0);
-
-// Calculate percentages (capped at 100%)
-// Formula: 100 - (current / goal * 100) gives the 'offset' needed to fill the ring
 $workoutOffset = 100 - min(100, ($totalWorkouts / 5) * 100);
 $gymOffset = 100 - min(100, ($gymCount / 2) * 100);
 $cardioOffset = 100 - min(100, ($cardioCount / 3) * 100);
@@ -82,7 +91,7 @@ $netCalories = (int)$nutritionData['consumed'] - (int)$nutritionData['burned'];
 
 /* QUERY 4: Macros */
 try {
-    $macroStmt = $db->prepare("SELECT COALESCE(SUM(protein_g), 0) as protein, COALESCE(SUM(carbs_g), 0) as carbs, COALESCE(SUM(fat_g), 0) as fat FROM daily_nutrition WHERE user_id = :uid AND tenant_id = :tid AND log_date = CURDATE()");
+    $macroStmt = $db->prepare("SELECT COALESCE(SUM(protein_g), 0) as protein, COALESCE(SUM(carbs_g), 0) as carbs, COALESCE(SUM(fats_g), 0) as fat FROM daily_nutrition WHERE user_id = :uid AND tenant_id = :tid AND log_date = CURDATE()");
     $macroStmt->execute(['uid' => $userId, 'tid' => $tenantId]);
     $macroData = $macroStmt->fetch(PDO::FETCH_ASSOC) ?: ['protein' => 0, 'carbs' => 0, 'fat' => 0];
 } catch (Exception $e) { $macroData = ['protein' => 0, 'carbs' => 0, 'fat' => 0]; }
@@ -94,21 +103,36 @@ try {
     $waterIntake = (float)(($hydrationStmt->fetch(PDO::FETCH_ASSOC) ?: ['water' => 0])['water']);
 } catch (Exception $e) { $waterIntake = 0; }
 
-/* QUERY 6: Volume Data (Line Chart) */
-$volumeStmt = $db->prepare("SELECT activity_date, COUNT(*) as session_count, COALESCE(SUM(duration_minutes), 0) as total_mins FROM activity_logs WHERE user_id = :uid AND tenant_id = :tid AND activity_date >= DATE_SUB(CURDATE(), INTERVAL :days DAY) GROUP BY activity_date ORDER BY activity_date ASC");
+/*
+ * QUERY 6: Volume Data (Line Chart)
+ * WORKAROUND: PDO::PARAM_INT quotes bound parameters as strings inside MySQL's
+ * INTERVAL clause (e.g., INTERVAL '30' DAY), causing a syntax error.
+ * Because $daysBack is validated against a strict allowlist [7, 30, 365],
+ * direct interpolation is safe from SQL injection and required for MySQL.
+ */
+$daysBackInt = (int)$daysBack;
+$volumeStmt = $db->prepare("
+    SELECT activity_date, COUNT(*) as session_count, COALESCE(SUM(duration_minutes), 0) as total_mins
+    FROM activity_logs
+    WHERE user_id = :uid AND tenant_id = :tid
+    AND activity_date >= DATE_SUB(CURDATE(), INTERVAL {$daysBackInt} DAY)
+    GROUP BY activity_date
+    ORDER BY activity_date ASC
+");
 $volumeStmt->bindValue(':uid', $userId, PDO::PARAM_INT);
 $volumeStmt->bindValue(':tid', $tenantId, PDO::PARAM_INT);
-$volumeStmt->bindValue(':days', $daysBack, PDO::PARAM_INT);
 $volumeStmt->execute();
 $volumeData = $volumeStmt->fetchAll(PDO::FETCH_ASSOC);
 
-/* QUERY 7: Streak */
+/* QUERY 7: Streak Calculation */
 $streakStmt = $db->prepare("SELECT activity_date FROM activity_logs WHERE user_id = :uid AND tenant_id = :tid AND activity_date <= CURDATE() GROUP BY activity_date ORDER BY activity_date DESC");
 $streakStmt->execute(['uid' => $userId, 'tid' => $tenantId]);
 $streakDates = array_column($streakStmt->fetchAll(PDO::FETCH_ASSOC), 'activity_date');
+
 $currentStreak = 0;
 $today = new DateTime(); $yesterday = (new DateTime())->modify('-1 day');
 $todayStr = $today->format('Y-m-d'); $yesterdayStr = $yesterday->format('Y-m-d');
+
 if (in_array($todayStr, $streakDates) || in_array($yesterdayStr, $streakDates)) {
     $currentStreak = 1;
     $checkDate = in_array($todayStr, $streakDates) ? $today : $yesterday;
@@ -141,7 +165,35 @@ $recentStmt = $db->prepare("SELECT al.activity_log_id, al.title, al.duration_min
 $recentStmt->execute(['uid' => $userId, 'tid' => $tenantId]);
 $recentActivities = $recentStmt->fetchAll(PDO::FETCH_ASSOC);
 
-// Prepare JSON payload for JS
+/* QUERY 12: Recent Kudos */
+$kudosStmt = $db->prepare("
+    SELECT k.created_at, u.display_name AS giver_name, al.title, al.activity_log_id
+    FROM kudos k
+    JOIN activity_logs al ON k.activity_log_id = al.activity_log_id
+    JOIN users u ON k.user_id = u.user_id
+    WHERE al.user_id = :uid AND al.tenant_id = :tid
+    ORDER BY k.created_at DESC
+    LIMIT 5
+");
+$kudosStmt->execute(['uid' => $userId, 'tid' => $tenantId]);
+$recentKudos = $kudosStmt->fetchAll(PDO::FETCH_ASSOC);
+
+/* QUERY 13: Personal Records */
+$prStmt = $db->prepare("
+    SELECT at.name AS type_name,
+           MAX(al.duration_minutes) AS best_duration,
+           MAX(al.distance_km) AS best_distance
+    FROM activity_logs al
+    JOIN activity_types at ON al.activity_type_id = at.activity_type_id AND al.tenant_id = at.tenant_id
+    WHERE al.user_id = :uid AND al.tenant_id = :tid
+    GROUP BY at.name
+    ORDER BY best_duration DESC
+    LIMIT 5
+");
+$prStmt->execute(['uid' => $userId, 'tid' => $tenantId]);
+$personalRecords = $prStmt->fetchAll(PDO::FETCH_ASSOC);
+
+// Prepare JSON payload for client-side JavaScript chart rendering.
 $chartData = [
     'range' => $range, 'periodLabel' => $periodLabel, 'daysBack' => $daysBack,
     'weekMinutes' => (int)$weekData['total_minutes'], 'weekWorkouts' => (int)$weekData['workout_count'],
@@ -159,22 +211,15 @@ require_once __DIR__ . '/includes/sidebar.php';
 ?>
 <div class="main-content dashboard-main">
     <div class="hero-stats-grid">
-        
         <!-- Ring 1: Workouts This Week (3-Layer Apple Watch Style) -->
-        <div class="stat-card-hero animate-on-scroll">
+        <div class="stat-card-hero animate-on-scroll" data-tooltip="Total workouts logged this week.">
             <div class="stat-icon-ring">
                 <svg viewBox="0 0 36 36" class="ring-chart" aria-hidden="true">
-                    <!-- Background Tracks -->
                     <path class="ring-bg" pathLength="100" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="var(--border)" stroke-width="3"/>
                     <path class="ring-bg" pathLength="100" d="M18 5.0845 a 12.9155 12.9155 0 0 1 0 25.831 a 12.9155 12.9155 0 0 1 0 -25.831" fill="none" stroke="var(--border)" stroke-width="3"/>
                     <path class="ring-bg" pathLength="100" d="M18 8.0845 a 9.9155 9.9155 0 0 1 0 19.831 a 9.9155 9.9155 0 0 1 0 -19.831" fill="none" stroke="var(--border)" stroke-width="3"/>
-
-                    <!-- Animated Rings -->
-                    <!-- Outer: Total Workouts (Purple) -->
                     <path class="ring-fill ring-outer" pathLength="100" stroke-dasharray="100" stroke-dashoffset="100" data-target="<?= $workoutOffset ?>" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="var(--accent)" stroke-width="3" stroke-linecap="round"/>
-                    <!-- Middle: Gym/Strength (Green) -->
                     <path class="ring-fill ring-middle" pathLength="100" stroke-dasharray="100" stroke-dashoffset="100" data-target="<?= $gymOffset ?>" d="M18 5.0845 a 12.9155 12.9155 0 0 1 0 25.831 a 12.9155 12.9155 0 0 1 0 -25.831" fill="none" stroke="var(--success)" stroke-width="3" stroke-linecap="round"/>
-                    <!-- Inner: Cardio (Grey/Text Color) -->
                     <path class="ring-fill ring-inner" pathLength="100" stroke-dasharray="100" stroke-dashoffset="100" data-target="<?= $cardioOffset ?>" d="M18 8.0845 a 9.9155 9.9155 0 0 1 0 19.831 a 9.9155 9.9155 0 0 1 0 -19.831" fill="none" stroke="#888888" stroke-width="3" stroke-linecap="round"/>
                 </svg>
                 <div class="stat-value" data-target="<?= $totalWorkouts ?>">0</div>
@@ -183,8 +228,8 @@ require_once __DIR__ . '/includes/sidebar.php';
             <div class="stat-trend positive">Goal: 5 sessions</div>
         </div>
 
-        <!-- Ring 2: Minutes Active (Single Ring) -->
-        <div class="stat-card-hero animate-on-scroll" style="animation-delay: 0.1s">
+        <!-- Ring 2: Minutes Active -->
+        <div class="stat-card-hero animate-on-scroll" style="animation-delay: 0.1s" data-tooltip="Total active minutes this week.">
             <div class="stat-icon-ring">
                 <svg viewBox="0 0 36 36" class="ring-chart" aria-hidden="true">
                     <path class="ring-bg" pathLength="100" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="var(--border)" stroke-width="3"/>
@@ -196,8 +241,8 @@ require_once __DIR__ . '/includes/sidebar.php';
             <div class="stat-trend positive">Goal: 150 mins</div>
         </div>
 
-        <!-- Ring 3: Net Calories Today (Single Ring) -->
-        <div class="stat-card-hero animate-on-scroll" style="animation-delay: 0.2s">
+        <!-- Ring 3: Net Calories Today -->
+        <div class="stat-card-hero animate-on-scroll" style="animation-delay: 0.2s" data-tooltip="Net calories for today (Consumed minus Burned).">
             <div class="stat-icon-ring">
                 <svg viewBox="0 0 36 36" class="ring-chart" aria-hidden="true">
                     <path class="ring-bg" pathLength="100" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="var(--border)" stroke-width="3"/>
@@ -210,7 +255,7 @@ require_once __DIR__ . '/includes/sidebar.php';
         </div>
 
         <!-- Ring 4: Day Streak -->
-        <div class="stat-card-hero streak-card animate-on-scroll" style="animation-delay: 0.3s">
+        <div class="stat-card-hero streak-card animate-on-scroll" style="animation-delay: 0.3s" data-tooltip="Consecutive days with logged activity.">
             <div class="streak-flame"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"/></svg></div>
             <div class="stat-value" data-target="<?= $currentStreak ?>">0</div>
             <div class="stat-label">Day Streak</div>
@@ -222,18 +267,19 @@ require_once __DIR__ . '/includes/sidebar.php';
         <div class="chart-header-row">
             <div><h2>Activity Progress</h2><p class="chart-subtitle"><?= htmlspecialchars($periodLabel) ?> &middot; <?= count($volumeData) ?> active days</p></div>
             <div class="time-range-toggles" role="tablist" aria-label="Time range selection">
-                <a href="?range=week" class="toggle-btn <?= $range === 'week' ? 'active' : '' ?>" role="tab" aria-selected="<?= $range === 'week' ? 'true' : 'false' ?>">Week</a>
-                <a href="?range=month" class="toggle-btn <?= $range === 'month' ? 'active' : '' ?>" role="tab" aria-selected="<?= $range === 'month' ? 'true' : 'false' ?>">Month</a>
-                <a href="?range=year" class="toggle-btn <?= $range === 'year' ? 'active' : '' ?>" role="tab" aria-selected="<?= $range === 'year' ? 'true' : 'false' ?>">Year</a>
+                <a href="dashboard.php?range=week" class="toggle-btn <?= $range === 'week' ? 'active' : '' ?>" role="tab" aria-selected="<?= $range === 'week' ? 'true' : 'false' ?>" data-tooltip="View data for the last 7 days.">Week</a>
+                <a href="dashboard.php?range=month" class="toggle-btn <?= $range === 'month' ? 'active' : '' ?>" role="tab" aria-selected="<?= $range === 'month' ? 'true' : 'false' ?>" data-tooltip="View data for the last 30 days.">Month</a>
+                <a href="dashboard.php?range=year" class="toggle-btn <?= $range === 'year' ? 'active' : '' ?>" role="tab" aria-selected="<?= $range === 'year' ? 'true' : 'false' ?>" data-tooltip="View data for the last 12 months.">Year</a>
             </div>
         </div>
-        <div class="chart-container tall">
+        <div class="chart-container tall" data-tooltip="Visualises your daily activity volume over time.">
+            <!-- FIXED: Changed stroke to #5D2E5D for high visibility against white background -->
             <svg id="volumeChart" class="line-chart-svg" viewBox="0 0 800 280" preserveAspectRatio="none" role="img" aria-label="Activity volume chart showing workout frequency over time">
                 <g id="volumeGrid"></g>
                 <path id="volumeArea" class="chart-area" fill="url(#volumeGradient)"/>
-                <path id="volumeLine" class="chart-line" fill="none" stroke="var(--accent)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+                <path id="volumeLine" class="chart-line" fill="none" stroke="#5D2E5D" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
                 <g id="volumePoints"></g>
-                <defs><linearGradient id="volumeGradient" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="var(--accent)" stop-opacity="0.3"/><stop offset="100%" stop-color="var(--accent)" stop-opacity="0"/></linearGradient></defs>
+                <defs><linearGradient id="volumeGradient" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#5D2E5D" stop-opacity="0.2"/><stop offset="100%" stop-color="#5D2E5D" stop-opacity="0"/></linearGradient></defs>
             </svg>
             <div class="chart-tooltip" id="volumeTooltip" role="tooltip"></div>
         </div>
@@ -254,10 +300,11 @@ require_once __DIR__ . '/includes/sidebar.php';
                 <?php endforeach; endif; ?>
             </div></div>
         </div>
+
         <div class="chart-card animate-on-scroll" style="animation-delay: 0.1s">
             <h2>Calorie Breakdown</h2><p class="chart-subtitle">Today's intake vs burn</p>
             <div class="calorie-breakdown">
-                <div class="calorie-ring-container">
+                <div class="calorie-ring-container" data-tooltip="Visual comparison of calories consumed versus burned today.">
                     <svg viewBox="0 0 120 120" class="donut-svg" role="img" aria-label="Calorie breakdown chart"><circle class="donut-bg" cx="60" cy="60" r="50" fill="none" stroke="var(--border)" stroke-width="12"/><circle class="donut-intake" cx="60" cy="60" r="50" fill="none" stroke="var(--accent)" stroke-width="12" stroke-dasharray="314" stroke-dashoffset="314" stroke-linecap="round" data-target="<?= min(314, 314 - (min((int)($nutritionData['consumed'] ?? 0), 3000) / 3000) * 314) ?>"/><circle class="donut-burn" cx="60" cy="60" r="38" fill="none" stroke="var(--success)" stroke-width="10" stroke-dasharray="239" stroke-dashoffset="239" stroke-linecap="round" data-target="<?= min(239, 239 - (min((int)($nutritionData['burned'] ?? 0), 1500) / 1500) * 239) ?>"/></svg>
                     <div class="donut-center"><div class="donut-net <?= $netCalories > 0 ? 'surplus' : 'deficit' ?>"><?= $netCalories > 0 ? '+' : '' ?><?= $netCalories ?></div><div class="donut-center-label">kcal net</div></div>
                 </div>
@@ -267,9 +314,10 @@ require_once __DIR__ . '/includes/sidebar.php';
                 </div>
             </div>
         </div>
+
         <div class="chart-card animate-on-scroll" style="animation-delay: 0.2s">
             <h2>Macros & Hydration</h2><p class="chart-subtitle">Today's breakdown</p>
-            <div class="macro-donut-container">
+            <div class="macro-donut-container" data-tooltip="Breakdown of protein, carbs, and fats consumed today.">
                 <?php $totalMacros = (int)($macroData['protein'] ?? 0) + (int)($macroData['carbs'] ?? 0) + (int)($macroData['fat'] ?? 0); $proteinPct = $totalMacros > 0 ? ((int)$macroData['protein'] / $totalMacros) * 100 : 33; $carbsPct = $totalMacros > 0 ? ((int)$macroData['carbs'] / $totalMacros) * 100 : 34; $fatPct = $totalMacros > 0 ? ((int)$macroData['fat'] / $totalMacros) * 100 : 33; ?>
                 <svg viewBox="0 0 100 100" class="macro-svg" role="img" aria-label="Macronutrient breakdown chart"><circle cx="50" cy="50" r="40" fill="none" stroke="var(--border)" stroke-width="14"/><circle cx="50" cy="50" r="40" fill="none" stroke="#2E7D32" stroke-width="14" stroke-dasharray="<?= $proteinPct * 2.51 ?> 251" stroke-dashoffset="0" transform="rotate(-90 50 50)"/><circle cx="50" cy="50" r="40" fill="none" stroke="#9F5F91" stroke-width="14" stroke-dasharray="<?= $carbsPct * 2.51 ?> 251" stroke-dashoffset="<?= -$proteinPct * 2.51 ?>" transform="rotate(-90 50 50)"/><circle cx="50" cy="50" r="40" fill="none" stroke="#F6EA98" stroke-width="14" stroke-dasharray="<?= $fatPct * 2.51 ?> 251" stroke-dashoffset="<?= -($proteinPct + $carbsPct) * 2.51 ?>" transform="rotate(-90 50 50)"/></svg>
                 <div class="macro-legend-inline"><div class="macro-item"><span class="macro-dot" style="background:#2E7D32"></span>Protein <?= (int)($macroData['protein'] ?? 0) ?>g</div><div class="macro-item"><span class="macro-dot" style="background:#9F5F91"></span>Carbs <?= (int)($macroData['carbs'] ?? 0) ?>g</div><div class="macro-item"><span class="macro-dot" style="background:#F6EA98"></span>Fat <?= (int)($macroData['fat'] ?? 0) ?>g</div></div>
@@ -280,20 +328,50 @@ require_once __DIR__ . '/includes/sidebar.php';
 
     <div class="dual-grid">
         <div class="chart-card animate-on-scroll">
-            <h2>Last 7 Days</h2><p class="chart-subtitle">Daily activity intensity</p>
-            <div class="mini-heatmap">
-                <?php $dayNames = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']; for ($i = 6; $i >= 0; $i--): $d = new DateTime(); $d->modify("-{$i} days"); $dateStr = $d->format('Y-m-d'); $count = $miniHeatmap[$dateStr] ?? 0; $level = $count === 0 ? 0 : ($count === 1 ? 1 : ($count === 2 ? 2 : 3)); $dayName = $dayNames[(int)$d->format('N') - 1]; $isToday = $i === 0; ?>
-                <div class="mini-heatmap-day level-<?= $level ?> <?= $isToday ? 'today' : '' ?>" title="<?= $d->format('j M') ?>: <?= $count ?> activities"><span class="mini-day-label"><?= $dayName ?></span><span class="mini-day-count"><?= $count ?></span></div>
-                <?php endfor; ?>
+            <h2>Last 7 Days</h2><p class="chart-subtitle">Daily activity sessions</p>
+            <?php
+            // Build bar chart data for last 7 days
+            $dayNames = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+            $barData = [];
+            $maxCount = 1; // Prevent division by zero
+            for ($i = 6; $i >= 0; $i--) {
+                $d = new DateTime();
+                $d->modify("-{$i} days");
+                $dateStr = $d->format('Y-m-d');
+                $count = $miniHeatmap[$dateStr] ?? 0;
+                $dayName = $dayNames[(int)$d->format('N') - 1];
+                $isToday = $i === 0;
+                $barData[] = ['day' => $dayName, 'count' => $count, 'isToday' => $isToday];
+                if ($count > $maxCount) $maxCount = $count;
+            }
+            ?>
+            <div style="display: flex; align-items: flex-end; justify-content: space-around; height: 140px; padding-top: 1rem; border-bottom: 1px solid var(--border);">
+                <?php foreach ($barData as $bar):
+                    $heightPct = $maxCount > 0 ? ($bar['count'] / $maxCount) * 100 : 0;
+                    $barColor = $bar['isToday'] ? 'var(--accent)' : 'var(--accent)';
+                    $opacity = $bar['count'] === 0 ? 0.2 : 1;
+                ?>
+                <div style="display: flex; flex-direction: column; align-items: center; flex: 1; max-width: 60px;">
+                    <div style="font-size: 0.75rem; font-weight: 600; color: var(--text); margin-bottom: 0.25rem;"><?= $bar['count'] ?></div>
+                    <div style="width: 32px; height: <?= max(4, $heightPct) ?>%; background: <?= $barColor ?>; opacity: <?= $opacity ?>; border-radius: 4px 4px 0 0; transition: height 0.6s ease; min-height: 4px;"></div>
+                </div>
+                <?php endforeach; ?>
+            </div>
+            <div style="display: flex; justify-content: space-around; margin-top: 0.5rem;">
+                <?php foreach ($barData as $bar): ?>
+                <div style="flex: 1; max-width: 60px; text-align: center; font-size: 0.75rem; font-weight: 600; color: <?= $bar['isToday'] ? 'var(--accent)' : 'var(--text)' ?>;"><?= $bar['day'] ?></div>
+                <?php endforeach; ?>
             </div>
         </div>
+
         <div class="chart-card animate-on-scroll" style="animation-delay: 0.1s">
             <h2>Weight Trend</h2><p class="chart-subtitle"><?php if ($latestMeasure): ?>Current: <?= number_format((float)$latestMeasure['weight_kg'], 1) ?> kg<?php if ($latestMeasure['bmi']): ?> &middot; BMI <?= $latestMeasure['bmi'] ?><?php endif; ?><?php else: ?>No measurements yet<?php endif; ?></p>
             <div class="chart-container short">
                 <?php if (count($weightTrend) >= 2): ?><svg id="weightChart" class="sparkline-svg" viewBox="0 0 300 100" preserveAspectRatio="none" role="img" aria-label="Weight trend chart"><path id="weightLine" class="sparkline" fill="none" stroke="var(--success)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><g id="weightPoints"></g></svg><?php else: ?><div class="empty-state">Log measurements in Profile to see trends.</div><?php endif; ?>
             </div>
             <?php if (count($weightTrend) >= 2): $first = (float)$weightTrend[0]['weight_kg']; $last = (float)end($weightTrend)['weight_kg']; $change = $last - $first; $changeClass = $change < 0 ? 'positive' : ($change > 0 ? 'negative' : ''); $changeSymbol = $change < 0 ? '-' : '+'; ?>
-            <div class="sparkline-footer"><span class="change <?= $changeClass ?>"><?= $changeSymbol ?><?= number_format(abs($change), 1) ?> kg over period</span></div><?php endif; ?>
+            <div class="sparkline-footer"><span class="change <?= $changeClass ?>"><?= $changeSymbol ?><?= number_format(abs($change), 1) ?> kg over period</span></div>
+            <?php endif; ?>
         </div>
     </div>
 
@@ -301,36 +379,40 @@ require_once __DIR__ . '/includes/sidebar.php';
         <div class="card community-goal-card animate-on-scroll">
             <div class="goal-info"><h2>Tenant Goal: <?= number_format($communityGoalTarget) ?> Active Minutes This Month</h2><p>Together, we've logged <strong><?= number_format($communityGoal) ?></strong> minutes.</p></div>
             <div class="progress-track" style="height: 16px; border-radius: 8px;"><div class="progress-fill" style="width: <?= $communityGoalPct ?>%; border-radius: 8px;"></div></div>
-            <div class="goal-footer"><span><?= $communityGoalPct ?>% complete</span><a href="/community.php" class="goal-link">View Community</a></div>
+            <div class="goal-footer"><span><?= $communityGoalPct ?>% complete</span><a href="community.php" class="goal-link" data-tooltip="View the full community feed and leaderboard.">View Community</a></div>
         </div>
+
         <div class="card animate-on-scroll" style="animation-delay: 0.1s">
             <h2>Quick Log</h2><p class="chart-subtitle">Fast access to common actions</p>
             <div class="quick-log-grid">
-                <a href="/workouts.php" class="quick-log-btn" aria-label="Log gym workout"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6.5 6.5h11M6.5 17.5h11M4 10v4M20 10v4M8 6v12M16 6v12"/></svg><span>Gym</span></a>
-                <a href="/workouts.php" class="quick-log-btn" aria-label="Log run"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="5" r="2"/><path d="M9 20l3-7 3 7"/></svg><span>Run</span></a>
-                <a href="/nutrition.php" class="quick-log-btn" aria-label="Log food"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M18 8h1a4 4 0 0 1 0 8h-1"/><path d="M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8z"/></svg><span>Food</span></a>
-                <a href="/profile.php" class="quick-log-btn" aria-label="Log weigh-in"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M2 12h4l3-9 4 18 3-9h4"/></svg><span>Weigh-in</span></a>
-                <a href="/challenges.php" class="quick-log-btn" aria-label="View challenges"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="8" r="7"/><polyline points="8.21 13.89 7 23 12 20 17 23 15.79 13.88"/></svg><span>Challenge</span></a>
-                <a href="/community.php" class="quick-log-btn" aria-label="View community"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg><span>Community</span></a>
+                <a href="workouts.php" class="quick-log-btn" aria-label="Log gym workout" data-tooltip="Log a gym or resistance session."><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6.5 6.5h11M6.5 17.5h11M4 10v4M20 10v4M8 6v12M16 6v12"/></svg><span>Gym</span></a>
+                <a href="workouts.php" class="quick-log-btn" aria-label="Log run" data-tooltip="Log a running session."><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="5" r="2"/><path d="M9 20l3-7 3 7"/></svg><span>Run</span></a>
+                <a href="nutrition.php" class="quick-log-btn" aria-label="Log food" data-tooltip="Log your daily food intake."><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M18 8h1a4 4 0 0 1 0 8h-1"/><path d="M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8z"/></svg><span>Food</span></a>
+                <a href="profile.php" class="quick-log-btn" aria-label="Log weigh-in" data-tooltip="Log your current weight."><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M2 12h4l3-9 4 18 3-9h4"/></svg><span>Weigh-in</span></a>
+                <a href="challenges.php" class="quick-log-btn" aria-label="View challenges" data-tooltip="View and manage your challenges."><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="8" r="7"/><polyline points="8.21 13.89 7 23 12 20 17 23 15.79 13.88"/></svg><span>Challenge</span></a>
+                <a href="community.php" class="quick-log-btn" aria-label="View community" data-tooltip="View the community feed."><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg><span>Community</span></a>
             </div>
         </div>
     </div>
 
     <div class="triple-grid">
         <div class="chart-card animate-on-scroll">
-            <div class="chart-header-row compact"><h2>Recent Activities</h2><a href="/workouts.php" class="chart-link">View all workouts</a></div>
+            <div class="chart-header-row compact"><h2>Recent Activities</h2><a href="workouts.php" class="chart-link" data-tooltip="View all logged workouts.">View all workouts</a></div>
             <?php if (empty($recentActivities)): ?><div class="empty-state">No activities logged yet.</div><?php else: ?><div class="activity-feed"><?php foreach ($recentActivities as $act): ?><div class="activity-feed-item"><div class="activity-feed-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></div><div class="activity-feed-details"><strong><?= htmlspecialchars($act['title']) ?></strong><span><?= htmlspecialchars($act['type_name']) ?></span><small><?= date('j M', strtotime($act['activity_date'])) ?><?php if ($act['duration_minutes']): ?> &middot; <?= $act['duration_minutes'] ?> mins<?php endif; ?></small></div></div><?php endforeach; ?></div><?php endif; ?>
         </div>
+
         <div class="chart-card animate-on-scroll" style="animation-delay: 0.1s">
-            <div class="chart-header-row compact"><h2>Recent Kudos</h2><a href="/community.php" class="chart-link">View community feed</a></div>
-            <?php if (empty($recentKudos)): ?><div class="empty-state">No kudos yet. Share a workout!</div><?php else: ?><div class="kudos-list"><?php foreach ($recentKudos as $kudo): ?><div class="kudo-item"><div class="kudo-icon"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"/></svg></div><div class="kudo-text"><strong><?= htmlspecialchars($kudo['display_name']) ?></strong><span>kudos'd "<?= htmlspecialchars($kudo['title']) ?>"</span><small><?= date('j M', strtotime($kudo['created_at'])) ?></small></div></div><?php endforeach; ?></div><?php endif; ?>
+            <div class="chart-header-row compact"><h2>Recent Kudos</h2><a href="community.php" class="chart-link" data-tooltip="View the full community feed.">View community feed</a></div>
+            <?php if (empty($recentKudos)): ?><div class="empty-state">No kudos yet. Share a workout!</div><?php else: ?><div class="kudos-list"><?php foreach ($recentKudos as $kudo): ?><div class="kudo-item"><div class="kudo-icon"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"/></svg></div><div class="kudo-text"><strong><?= htmlspecialchars($kudo['giver_name']) ?></strong><span>kudos'd "<?= htmlspecialchars($kudo['title']) ?>"</span><small><?= date('j M', strtotime($kudo['created_at'])) ?></small></div></div><?php endforeach; ?></div><?php endif; ?>
         </div>
+
         <div class="chart-card animate-on-scroll" style="animation-delay: 0.2s">
-            <div class="chart-header-row compact"><h2>Personal Records</h2><a href="/progress.php" class="chart-link">View progress</a></div>
+            <div class="chart-header-row compact"><h2>Personal Records</h2><a href="progress.php" class="chart-link" data-tooltip="View your detailed progress metrics.">View progress</a></div>
             <?php if (empty($personalRecords)): ?><div class="empty-state">Complete workouts to set records!</div><?php else: ?><div class="pr-list"><?php foreach ($personalRecords as $pr): ?><div class="pr-item"><div class="pr-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="8" r="7"/><polyline points="8.21 13.89 7 23 12 20 17 23 15.79 13.88"/></svg></div><div class="pr-details"><strong><?= htmlspecialchars($pr['type_name']) ?></strong><?php if ($pr['best_duration']): ?><span><?= $pr['best_duration'] ?> mins</span><?php endif; ?><?php if ($pr['best_distance']): ?><span><?= $pr['best_distance'] ?> km</span><?php endif; ?></div></div><?php endforeach; ?></div><?php endif; ?>
         </div>
     </div>
 </div>
+
 <script>const dashboardData = <?= json_encode($chartData, JSON_HEX_TAG | JSON_HEX_AMP) ?>;</script>
-<script src="/js/dashboard.js"></script>
+<script src="js/dashboard.js"></script>
 <?php require_once __DIR__ . '/includes/footer.php'; ?>

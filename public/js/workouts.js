@@ -1,4 +1,4 @@
-/* global document, window, fetch, alert, setTimeout, location */
+/* global window, document, console, fetch, alert, setTimeout, location */
 'use strict';
 
 /**
@@ -6,203 +6,203 @@
  * Location: /public/js/workouts.js
  *
  * Purpose:
- * Handles dynamic form switching, exercise library population,
- * time-range chart rendering, and asynchronous workout submission.
+ * Handles all workouts page interactions, form submissions, and chart rendering.
+ * Demonstrates MPA architecture with full CRUD operations.
  */
 
-// Chart data injected by PHP
-const chartData = window.workoutChartData || {};
-
 document.addEventListener('DOMContentLoaded', function () {
-    // Set default dates to today
+    // Set all date inputs to today's date by default
     document.querySelectorAll('input[type="date"]').forEach(function (input) {
-        if (!input.value) input.valueAsDate = new Date();
+        if (!input.value) {
+            input.valueAsDate = new Date();
+        }
     });
 
-    populateExerciseLibrary(window.currentGender || 'neutral');
-    loadRecentWorkouts();
+    // Populate the initial exercise library based on user profile gender
+    populateExerciseLibrary(window.currentGender || 'prefer_not_to_say');
 
-    // Initial chart render
-    renderFrequencyChart('week');
-    renderVolumeChart('week');
+    // Render default charts (Week view) on load
+    switchChart('frequency', 'week');
+    switchChart('volume', 'week');
 });
 
 /**
- * Switch Chart Range (Week/Month/Year)
+ * Chart Range Switcher
+ * Uses Bar Chart for Week/Month, and a distinct Area Chart for Year.
+ * FIXED: No longer relies on 'event.target' so it works on auto-load.
  */
 window.switchChart = function (chartType, range) {
-    // Update active button state
-    const controls = event.target.parentElement;
-    controls.querySelectorAll('button').forEach(function (btn) {
+    const container = document.getElementById(chartType === 'frequency' ? 'frequencyChart' : 'volumeChart');
+    const data = window.workoutChartData[chartType][range];
+    
+    // Update active button state automatically
+    const buttons = container.parentElement.querySelectorAll('.chart-controls button');
+    buttons.forEach(btn => {
         btn.classList.remove('active');
+        if (btn.getAttribute('onclick').includes("'" + range + "'")) {
+            btn.classList.add('active');
+        }
     });
-    event.target.classList.add('active');
 
-    if (chartType === 'frequency') {
-        renderFrequencyChart(range);
+    // Use Area Chart for 'year', Bar Chart for 'week'/'month'
+    if (range === 'year') {
+        renderAreaChart(container, data, chartType === 'frequency' ? 'count' : 'minutes', chartType + 'Tooltip');
     } else {
-        renderVolumeChart(range);
+        renderBarChart(container, data, chartType === 'frequency' ? 'count' : 'minutes', chartType + 'Tooltip');
     }
 };
 
 /**
- * Render Frequency Chart (Count of workouts)
+ * Bar Chart Renderer (for Week/Month)
  */
-function renderFrequencyChart(range) {
-    const container = document.getElementById('frequencyChart');
-    let data = chartData.frequency[range] || [];
+function renderBarChart(container, data, valueKey, tooltipId) {
+    const width = 600;
+    const height = 200;
+    const padding = { top: 20, right: 20, bottom: 30, left: 40 };
+    const chartW = width - padding.left - padding.right;
+    const chartH = height - padding.top - padding.bottom;
+    
+    const values = data.map(d => d[valueKey]);
+    const maxVal = Math.max(...values, 1);
+    const barWidth = (chartW / data.length) * 0.6;
+    const spacing = (chartW / data.length) * 0.4;
 
-    // FIX: Ensure week view always has 7 days (Mon-Sun) even if empty
-    if (range === 'week' && data.length < 7) {
-        const fullWeek = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-        const existingDays = data.map(function (d) { return d.label; });
-        fullWeek.forEach(function (day) {
-            if (existingDays.indexOf(day) === -1) {
-                data.push({ label: day, count: 0, minutes: 0 });
-            }
-        });
-        // Re-sort to match Mon-Sun order
-        data.sort(function (a, b) { return fullWeek.indexOf(a.label) - fullWeek.indexOf(b.label); });
+    let svgContent = `<svg viewBox="0 0 ${width} ${height}" style="width: 100%; height: 100%;">`;
+
+    // Grid lines
+    for (let i = 0; i <= 4; i++) {
+        const y = padding.top + (i * chartH / 4);
+        const val = Math.round(maxVal - (maxVal / 4) * i);
+        svgContent += `<line x1="${padding.left}" y1="${y}" x2="${width - padding.right}" y2="${y}" stroke="var(--border)" stroke-width="1" stroke-dasharray="4" opacity="0.5"/>`;
+        svgContent += `<text x="${padding.left - 8}" y="${y + 4}" text-anchor="end" fill="var(--text)" font-size="10" opacity="0.7">${val}</text>`;
     }
 
-    if (range === 'year') {
-        renderLineChart(container, data, 'count', 'frequencyTooltip', false);
-    } else {
-        renderBarChart(container, data, 'count', 'workouts', 'frequencyTooltip');
-    }
-}
-
-/**
- * Render Volume Chart (Minutes)
- */
-function renderVolumeChart(range) {
-    const container = document.getElementById('volumeChart');
-    let data = chartData.volume[range] || [];
-
-    // FIX: Ensure week view always has 7 days
-    if (range === 'week' && data.length < 7) {
-        const fullWeek = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-        const existingDays = data.map(function (d) { return d.label; });
-        fullWeek.forEach(function (day) {
-            if (existingDays.indexOf(day) === -1) {
-                data.push({ label: day, count: 0, minutes: 0 });
-            }
-        });
-        data.sort(function (a, b) { return fullWeek.indexOf(a.label) - fullWeek.indexOf(b.label); });
-    }
-
-    if (range === 'month' || range === 'year') {
-        renderLineChart(container, data, 'minutes', 'volumeTooltip', true);
-    } else {
-        renderBarChart(container, data, 'minutes', 'mins', 'volumeTooltip');
-    }
-}
-
-/**
- * Bar Chart Renderer (SVG)
- * Uses explicit fill attributes to prevent black blocks.
- */
-function renderBarChart(container, data, valueKey, unit, tooltipId) {
-    const maxVal = Math.max.apply(null, data.map(function (d) { return d[valueKey]; })) || 1;
-    const width = 400;
-    const height = 160;
-    const barWidth = (width / data.length) * 0.6;
-    const spacing = (width / data.length) * 0.4;
-
-    let svgContent = '<svg class="line-chart" viewBox="0 0 ' + width + ' ' + height + '" preserveAspectRatio="none">';
-
-    data.forEach(function (d, i) {
+    // Bars
+    data.forEach((d, i) => {
         const val = d[valueKey];
-        const h = val > 0 ? Math.max(4, (val / maxVal) * (height - 30)) : 0;
-        const x = (i * (width / data.length)) + (spacing / 2);
-        const y = height - 20 - h;
+        const h = val > 0 ? (val / maxVal) * chartH : 0;
+        const x = padding.left + (i * (chartW / data.length)) + (spacing / 2);
+        const y = height - padding.bottom - h;
 
-        svgContent += '<rect x="' + x + '" y="' + y + '" width="' + barWidth + '" height="' + h + '" ' +
-            'fill="var(--accent)" rx="4" ry="4" ' +
-            'onmouseenter="showTooltip(event, \'' + tooltipId + '\', \'' + d.label + ': ' + val + ' ' + unit + '\')" ' +
-            'onmouseleave="hideTooltip(\'' + tooltipId + '\')"></rect>';
-        svgContent += '<text x="' + (x + barWidth / 2) + '" y="' + (height - 5) + '" text-anchor="middle" font-size="10" fill="var(--text)" opacity="0.7">' + d.label + '</text>';
+        svgContent += `<rect x="${x}" y="${y}" width="${barWidth}" height="${h}" fill="var(--accent)" rx="4" ry="4"
+            onmouseenter="showTooltip(event, '${tooltipId}', '${d.label}: ${val}')" 
+            onmouseleave="hideTooltip('${tooltipId}')"/>`;
+        
+        // X-axis labels
+        const labelInterval = Math.ceil(data.length / 6);
+        if (i % labelInterval === 0 || i === data.length - 1) {
+            svgContent += `<text x="${x + barWidth / 2}" y="${height - 5}" text-anchor="middle" fill="var(--text)" font-size="10" opacity="0.7">${d.label}</text>`;
+        }
     });
 
-    svgContent += '</svg>';
+    svgContent += `</svg>`;
     container.innerHTML = svgContent;
 }
 
 /**
- * Line Chart Renderer (SVG)
- * Uses explicit stroke attributes to prevent black lines.
+ * Area Chart Renderer (Specifically for Year view)
  */
-function renderLineChart(container, data, valueKey, tooltipId, showArea) {
-    const width = 400;
-    const height = 160;
-    const padding = 20;
-    const maxVal = Math.max.apply(null, data.map(function (d) { return d[valueKey]; })) || 1;
-
-    const points = data.map(function (d, i) {
+function renderAreaChart(container, data, valueKey, tooltipId) {
+    const width = 600;
+    const height = 200;
+    const padding = { top: 20, right: 20, bottom: 30, left: 40 };
+    const chartW = width - padding.left - padding.right;
+    const chartH = height - padding.top - padding.bottom;
+    
+    const values = data.map(d => d[valueKey]);
+    const maxVal = Math.max(...values, 1);
+    
+    const points = data.map((d, i) => {
         return {
-            x: padding + (i / Math.max(data.length - 1, 1)) * (width - 2 * padding),
-            y: height - padding - (d[valueKey] / maxVal) * (height - 2 * padding),
+            x: padding.left + (i / Math.max(data.length - 1, 1)) * chartW,
+            y: height - padding.bottom - (d[valueKey] / maxVal) * chartH,
             label: d.label,
             value: d[valueKey]
         };
     });
 
-    let pathD = points.map(function (p, i) { return (i === 0 ? 'M' : 'L') + ' ' + p.x + ' ' + p.y; }).join(' ');
-    let areaD = '';
+    // Create area path
+    let areaD = `M ${points[0].x} ${height - padding.bottom}`;
+    points.forEach(p => {
+        areaD += ` L ${p.x} ${p.y}`;
+    });
+    areaD += ` L ${points[points.length - 1].x} ${height - padding.bottom} Z`;
 
-    if (showArea) {
-        areaD = pathD + ' L ' + points[points.length - 1].x + ' ' + (height - padding) + ' L ' + points[0].x + ' ' + (height - padding) + ' Z';
+    // Create line path
+    let lineD = points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ');
+
+    let svgContent = `<svg viewBox="0 0 ${width} ${height}" style="width: 100%; height: 100%;">`;
+    
+    // Define gradient for the area fill
+    svgContent += `<defs>
+        <linearGradient id="areaGradient" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="var(--accent)" stop-opacity="0.3"/>
+            <stop offset="100%" stop-color="var(--accent)" stop-opacity="0.05"/>
+        </linearGradient>
+    </defs>`;
+
+    // Grid lines
+    for (let i = 0; i <= 4; i++) {
+        const y = padding.top + (i * chartH / 4);
+        const val = Math.round(maxVal - (maxVal / 4) * i);
+        svgContent += `<line x1="${padding.left}" y1="${y}" x2="${width - padding.right}" y2="${y}" stroke="var(--border)" stroke-width="1" stroke-dasharray="4" opacity="0.5"/>`;
+        svgContent += `<text x="${padding.left - 8}" y="${y + 4}" text-anchor="end" fill="var(--text)" font-size="10" opacity="0.7">${val}</text>`;
     }
 
-    let svgContent = '<svg class="line-chart" viewBox="0 0 ' + width + ' ' + height + '" preserveAspectRatio="none">';
+    // Draw Area Fill
+    svgContent += `<path d="${areaD}" fill="url(#areaGradient)"/>`;
+    
+    // Draw Line on top
+    svgContent += `<path d="${lineD}" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>`;
 
-    if (showArea) {
-        svgContent += '<defs>' +
-            '<linearGradient id="lineGradient" x1="0" y1="0" x2="0" y2="1">' +
-            '<stop offset="0%" stop-color="var(--accent)" stop-opacity="0.3"/>' +
-            '<stop offset="100%" stop-color="var(--accent)" stop-opacity="0"/>' +
-            '</linearGradient></defs>' +
-            '<path d="' + areaD + '" fill="url(#lineGradient)" opacity="0.5"></path>';
-    }
-
-    svgContent += '<path d="' + pathD + '" fill="none" stroke="var(--accent)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"></path>';
-
-    points.forEach(function (p) {
-        svgContent += '<circle cx="' + p.x + '" cy="' + p.y + '" r="4" fill="var(--card)" stroke="var(--accent)" stroke-width="2" ' +
-            'onmouseenter="showTooltip(event, \'' + tooltipId + '\', \'' + p.label + ': ' + p.value + ' mins\')" ' +
-            'onmouseleave="hideTooltip(\'' + tooltipId + '\')"></circle>';
+    // Draw Points with tooltips
+    points.forEach(p => {
+        svgContent += `<circle cx="${p.x}" cy="${p.y}" r="4" fill="var(--card)" stroke="var(--accent)" stroke-width="2" 
+            onmouseenter="showTooltip(event, '${tooltipId}', '${p.label}: ${p.value}')" 
+            onmouseleave="hideTooltip('${tooltipId}')"/>`;
     });
 
-    svgContent += '</svg>';
+    // X-axis labels
+    const labelInterval = Math.ceil(points.length / 6);
+    points.forEach((p, i) => {
+        if (i % labelInterval === 0 || i === points.length - 1) {
+            svgContent += `<text x="${p.x}" y="${height - 5}" text-anchor="middle" fill="var(--text)" font-size="10" opacity="0.7">${p.label}</text>`;
+        }
+    });
+
+    svgContent += `</svg>`;
     container.innerHTML = svgContent;
 }
 
 /**
- * Tooltip Logic
+ * Tooltip Helpers
  */
 window.showTooltip = function (event, tooltipId, text) {
     const tooltip = document.getElementById(tooltipId);
-    const container = tooltip.parentElement;
-    const rect = container.getBoundingClientRect();
+    if (!tooltip) return;
     tooltip.textContent = text;
     tooltip.classList.add('visible');
-    const x = event.clientX - rect.left;
-    const y = event.clientY - rect.top - 40;
-    tooltip.style.left = x + 'px';
-    tooltip.style.top = y + 'px';
+    
+    // Position relative to viewport to avoid overflow issues
+    tooltip.style.left = (event.clientX + 15) + 'px';
+    tooltip.style.top = (event.clientY - 30) + 'px';
     tooltip.style.transform = 'translateX(-50%)';
 };
 
 window.hideTooltip = function (tooltipId) {
-    document.getElementById(tooltipId).classList.remove('visible');
+    const tooltip = document.getElementById(tooltipId);
+    if (tooltip) {
+        tooltip.classList.remove('visible');
+    }
 };
 
 /**
- * Form & Exercise Logic
+ * Workout Form UI Helpers
  */
 window.selectWorkoutType = function (type) {
     document.querySelectorAll('.workout-type-card').forEach(function (c) { c.classList.remove('active'); });
     document.querySelectorAll('.workout-form-section').forEach(function (f) { f.classList.remove('active'); });
+    
     document.querySelector('.workout-type-card[data-type="' + type + '"]').classList.add('active');
     document.getElementById('form-' + type).classList.add('active');
 };
@@ -218,7 +218,7 @@ function populateExerciseLibrary(gender) {
     const library = document.getElementById('exerciseLibrary');
     const exercises = window.exercisePrograms[gender] || window.exercisePrograms.neutral;
     window.selectedExercises = [];
-
+    
     library.innerHTML = exercises.map(function (ex) {
         return '<label class="exercise-item" onclick="toggleExercise(this, \'' + ex.name + '\')">' +
             '<input type="checkbox" value="' + ex.name + '">' +
@@ -232,7 +232,7 @@ window.toggleExercise = function (element, name) {
     const checkbox = element.querySelector('input');
     checkbox.checked = !checkbox.checked;
     element.classList.toggle('selected', checkbox.checked);
-
+    
     if (checkbox.checked) {
         window.selectedExercises.push(name);
     } else {
@@ -240,29 +240,13 @@ window.toggleExercise = function (element, name) {
     }
 };
 
-function loadRecentWorkouts() {
-    fetch('/api/activities.php')
-        .then(function (res) { return res.json(); })
-        .then(function (data) {
-            if (data.success) {
-                const container = document.getElementById('recentWorkoutsList');
-                if (data.data.length === 0) {
-                    container.innerHTML = '<p class="empty-state">No workouts logged yet.</p>';
-                    return;
-                }
-                container.innerHTML = data.data.map(function (act) {
-                    return '<div class="activity-item"><div><strong>' + act.title + '</strong> (' + act.type_name + ')<br>' +
-                        '<small>' + act.activity_date + ' • ' + (act.duration_minutes || 0) + ' mins' +
-                        (act.distance_km ? ' • ' + act.distance_km + ' km' : '') + '</small></div></div>';
-                }).join('');
-            }
-        });
-}
-
+/**
+ * Form Submission Handler
+ */
 window.submitWorkout = function (typeId) {
     const activeForm = document.querySelector('.workout-form-section.active');
     if (!activeForm) return;
-
+    
     const titleInput = activeForm.querySelector('input[id$="Title"]');
     const title = titleInput ? titleInput.value : '';
     const dateInput = activeForm.querySelector('input[id$="Date"]');
@@ -271,17 +255,17 @@ window.submitWorkout = function (typeId) {
     const duration = durationInput ? durationInput.value : null;
     const distanceInput = activeForm.querySelector('input[id$="Distance"]');
     const distance = distanceInput ? distanceInput.value : null;
-
+    
     if (!title) {
         alert('Please enter a session title.');
         return;
     }
-
+    
     let finalTitle = title;
     if (typeId === 4 && window.selectedExercises.length > 0) {
         finalTitle = title + ' [' + window.selectedExercises.join(', ') + ']';
     }
-
+    
     const payload = {
         activity_type_id: typeId,
         title: finalTitle,
@@ -289,8 +273,8 @@ window.submitWorkout = function (typeId) {
         duration_minutes: duration,
         distance_km: distance
     };
-
-    fetch('/api/activities.php', {
+    
+    fetch('api/activities.php', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
@@ -298,15 +282,20 @@ window.submitWorkout = function (typeId) {
     .then(function (res) { return res.json(); })
     .then(function (res) {
         if (res.success) {
+            // Reset form fields
             activeForm.querySelectorAll('input').forEach(function (i) { i.value = ''; });
             activeForm.querySelector('input[type="date"]').valueAsDate = new Date();
+            
+            // Reset UI state
             document.querySelectorAll('.workout-type-card').forEach(function (c) { c.classList.remove('active'); });
             activeForm.classList.remove('active');
             window.selectedExercises = [];
-            loadRecentWorkouts();
-            setTimeout(function () { location.reload(); }, 500);
+            
+            // Refresh data and charts
+            location.reload();
         } else {
-            alert('Error logging workout: ' + (res.error || 'Unknown error'));
+            alert('Error: ' + (res.error || 'Unknown error'));
         }
-    });
+    })
+    .catch(err => alert('Network error: ' + err.message));
 };

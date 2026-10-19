@@ -131,6 +131,7 @@ try {
                 $weight = round($baseWeight + (mt_rand(-2, 2) / 10), 1);
                 $bmi = round($weight / (1.75 * 1.75), 1);
 
+                // FIXED: Removed tenant_id as user_measurements table does not have this column
                 $db->prepare("
                     INSERT INTO user_measurements 
                     (user_id, weight_kg, bmi, chest_cm, waist_cm, hips_cm, left_arm_cm, right_arm_cm, left_leg_cm, right_leg_cm, recorded_at)

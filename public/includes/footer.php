@@ -11,7 +11,10 @@ declare(strict_types=1);
     </footer>
 </div>
 
-<script src="/js/main.js"></script>
-<script src="/js/avatar-cropper.js"></script>
+<!-- FIXED: Removed leading slashes so the <base> tag in header.php resolves them correctly -->
+<script src="js/main.js"></script>
+<script src="js/avatar-cropper.js"></script>
+<!-- Global Tooltip Handler -->
+<script src="js/tooltips.js"></script>
 </body>
 </html>

@@ -2,19 +2,30 @@
 /**
  * File: logout.php
  * Location: /public/logout.php
- * 
+ *
  * Purpose:
  * Destroys the user session and redirects to the login page.
- * Delegates the actual cookie clearing and session destruction 
- * to the Session class to ensure consistency.
+ * This file contains no UI elements, so no tooltips are required.
  */
 declare(strict_types=1);
-
-// Fixed: Added '/../' to navigate up to the root config directory
 require_once __DIR__ . '/../config/Session.php';
-
 Session::start();
-Session::destroy();
 
+// Unset all session variables
+$_SESSION = [];
+
+// Destroy the session cookie
+if (ini_get("session.use_cookies")) {
+    $params = session_get_cookie_params();
+    setcookie(session_name(), '', time() - 42000,
+        $params["path"], $params["domain"],
+        $params["secure"], $params["httponly"]
+    );
+}
+
+// Destroy the session
+session_destroy();
+
+// Redirect to login
 header('Location: login.php');
 exit;

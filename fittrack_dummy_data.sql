@@ -454,3 +454,93 @@ WHERE user_id = 16 AND tenant_id = 3;
 -- moderator001@example.test
 -- user001@example.test
 -- viewer001@example.test
+
+-- =============================================================================
+-- MEAL PLAN DUMMY DATA
+-- Populates meal_plan_items for the current week for user 16 (fit_user_001)
+-- in the Greater Manchester Active tenant.
+-- =============================================================================
+
+-- First, get the tenant_id and user_id we need
+SET @tenant_gm = (SELECT tenant_id FROM tenants WHERE tenant_slug = 'greater-manchester-active');
+SET @user_001 = (SELECT user_id FROM users WHERE username = 'fit_user_001');
+
+-- Calculate Monday of the current week
+SET @monday = DATE_SUB(CURRENT_DATE, INTERVAL (DAYOFWEEK(CURRENT_DATE) - 2) DAY);
+
+-- Insert meals for the current week (Monday to Sunday)
+-- Each day has breakfast, lunch, dinner, and optionally snacks
+INSERT INTO meal_plan_items
+(tenant_id, user_id, meal_date, meal_slot, food_name, calories, protein_g, carbs_g, fats_g, notes)
+VALUES
+-- Monday
+(@tenant_gm, @user_001, @monday, 'breakfast', 'Porridge with Banana', 320, 10, 58, 6, 'Add honey for extra energy'),
+(@tenant_gm, @user_001, @monday, 'lunch', 'Chicken Caesar Salad', 450, 38, 12, 28, 'Use Greek yoghurt dressing'),
+(@tenant_gm, @user_001, @monday, 'dinner', 'Salmon with Roasted Vegetables', 520, 42, 22, 28, 'Wild-caught salmon preferred'),
+(@tenant_gm, @user_001, @monday, 'snacks', 'Apple with Almond Butter', 220, 6, 24, 14, NULL),
+
+-- Tuesday
+(@tenant_gm, @user_001, DATE_ADD(@monday, INTERVAL 1 DAY), 'breakfast', 'Greek Yoghurt with Berries', 280, 18, 36, 6, 'Use full-fat yoghurt'),
+(@tenant_gm, @user_001, DATE_ADD(@monday, INTERVAL 1 DAY), 'lunch', 'Turkey and Avocado Wrap', 480, 32, 38, 22, 'Wholemeal wrap'),
+(@tenant_gm, @user_001, DATE_ADD(@monday, INTERVAL 1 DAY), 'dinner', 'Beef Stir-Fry with Rice', 580, 36, 62, 18, 'Use lean beef mince'),
+(@tenant_gm, @user_001, DATE_ADD(@monday, INTERVAL 1 DAY), 'snacks', 'Protein Bar', 210, 20, 22, 8, NULL),
+
+-- Wednesday
+(@tenant_gm, @user_001, DATE_ADD(@monday, INTERVAL 2 DAY), 'breakfast', 'Scrambled Eggs on Toast', 380, 22, 28, 20, 'Two eggs, wholemeal bread'),
+(@tenant_gm, @user_001, DATE_ADD(@monday, INTERVAL 2 DAY), 'lunch', 'Tuna Salad Sandwich', 420, 34, 42, 12, 'Add cucumber and tomato'),
+(@tenant_gm, @user_001, DATE_ADD(@monday, INTERVAL 2 DAY), 'dinner', 'Chicken Curry with Rice', 620, 44, 68, 18, 'Medium spice level'),
+(@tenant_gm, @user_001, DATE_ADD(@monday, INTERVAL 2 DAY), 'snacks', 'Handful of Mixed Nuts', 180, 6, 6, 16, 'Unsalted variety'),
+
+-- Thursday
+(@tenant_gm, @user_001, DATE_ADD(@monday, INTERVAL 3 DAY), 'breakfast', 'Smoothie Bowl', 340, 14, 52, 8, 'Banana, berries, protein powder'),
+(@tenant_gm, @user_001, DATE_ADD(@monday, INTERVAL 3 DAY), 'lunch', 'Vegetable Soup with Bread', 320, 12, 48, 8, 'Homemade minestrone'),
+(@tenant_gm, @user_001, DATE_ADD(@monday, INTERVAL 3 DAY), 'dinner', 'Pasta Bolognese', 640, 32, 78, 22, 'Use wholewheat pasta'),
+(@tenant_gm, @user_001, DATE_ADD(@monday, INTERVAL 3 DAY), 'snacks', 'Carrot Sticks with Hummus', 150, 6, 18, 6, NULL),
+
+-- Friday
+(@tenant_gm, @user_001, DATE_ADD(@monday, INTERVAL 4 DAY), 'breakfast', 'Avocado Toast with Poached Egg', 420, 18, 32, 26, 'Sourdough bread'),
+(@tenant_gm, @user_001, DATE_ADD(@monday, INTERVAL 4 DAY), 'lunch', 'Chicken and Rice Bowl', 520, 38, 58, 12, 'Add steamed broccoli'),
+(@tenant_gm, @user_001, DATE_ADD(@monday, INTERVAL 4 DAY), 'dinner', 'Fish and Chips (Baked)', 480, 32, 52, 16, 'Oven-baked, not fried'),
+(@tenant_gm, @user_001, DATE_ADD(@monday, INTERVAL 4 DAY), 'snacks', 'Dark Chocolate Square', 120, 2, 12, 8, '70% cocoa minimum'),
+
+-- Saturday
+(@tenant_gm, @user_001, DATE_ADD(@monday, INTERVAL 5 DAY), 'breakfast', 'Pancakes with Maple Syrup', 420, 10, 68, 12, 'Weekend treat'),
+(@tenant_gm, @user_001, DATE_ADD(@monday, INTERVAL 5 DAY), 'lunch', 'BLT Sandwich', 460, 24, 38, 24, 'Add extra lettuce'),
+(@tenant_gm, @user_001, DATE_ADD(@monday, INTERVAL 5 DAY), 'dinner', 'Homemade Pizza', 680, 28, 82, 26, 'Thin crust, margherita'),
+(@tenant_gm, @user_001, DATE_ADD(@monday, INTERVAL 5 DAY), 'snacks', 'Fruit Salad', 120, 2, 28, 1, 'Seasonal fruits'),
+
+-- Sunday
+(@tenant_gm, @user_001, DATE_ADD(@monday, INTERVAL 6 DAY), 'breakfast', 'Full English Breakfast', 580, 32, 28, 38, 'Weekend special'),
+(@tenant_gm, @user_001, DATE_ADD(@monday, INTERVAL 6 DAY), 'lunch', 'Sunday Roast Chicken', 620, 48, 42, 28, 'With roast potatoes and veg'),
+(@tenant_gm, @user_001, DATE_ADD(@monday, INTERVAL 6 DAY), 'dinner', 'Leftover Roast Sandwich', 380, 24, 38, 14, 'Use Sunday roast leftovers'),
+(@tenant_gm, @user_001, DATE_ADD(@monday, INTERVAL 6 DAY), 'snacks', 'Biscuits and Tea', 180, 3, 24, 8, 'Two digestive biscuits')
+ON DUPLICATE KEY UPDATE
+food_name = VALUES(food_name),
+calories = VALUES(calories),
+protein_g = VALUES(protein_g),
+carbs_g = VALUES(carbs_g),
+fats_g = VALUES(fats_g),
+notes = VALUES(notes);
+
+-- 1. Get the user_id for fit_user_001
+SET @user_id = (SELECT user_id FROM users WHERE username = 'fit_user_001');
+
+-- 2. Insert 5 weeks of measurement data
+-- Note: tenant_id removed as it doesn't exist in this table
+INSERT INTO user_measurements 
+(user_id, weight_kg, bmi, chest_cm, waist_cm, left_arm_cm, right_arm_cm, left_leg_cm, right_leg_cm, recorded_at)
+VALUES
+(@user_id, 71.2, 23.3, 97.5, 83.8, 33.9, 33.4, 57.0, 55.5, DATE_SUB(CURDATE(), INTERVAL 28 DAY)),
+(@user_id, 71.0, 23.2, 97.3, 83.6, 33.8, 33.3, 56.9, 55.4, DATE_SUB(CURDATE(), INTERVAL 21 DAY)),
+(@user_id, 70.9, 23.2, 97.1, 83.5, 33.8, 33.3, 56.8, 55.3, DATE_SUB(CURDATE(), INTERVAL 14 DAY)),
+(@user_id, 70.8, 23.1, 97.0, 83.3, 33.7, 33.2, 56.8, 55.3, DATE_SUB(CURDATE(), INTERVAL 7 DAY)),
+(@user_id, 70.7, 23.1, 96.9, 83.2, 33.7, 33.2, 56.8, 55.3, CURDATE())
+ON DUPLICATE KEY UPDATE
+weight_kg = VALUES(weight_kg), 
+bmi = VALUES(bmi),
+chest_cm = VALUES(chest_cm), 
+waist_cm = VALUES(waist_cm),
+left_arm_cm = VALUES(left_arm_cm), 
+right_arm_cm = VALUES(right_arm_cm),
+left_leg_cm = VALUES(left_leg_cm), 
+right_leg_cm = VALUES(right_leg_cm);

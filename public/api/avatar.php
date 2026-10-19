@@ -126,18 +126,21 @@ if (!$saveOk) {
 $stmt = $db->prepare("SELECT avatar_path FROM users WHERE user_id = :id");
 $stmt->execute(['id' => $userId]);
 $old = $stmt->fetchColumn();
+
+// ltrim ensures we don't get double slashes if the old path had a leading slash
 if ($old && file_exists(__DIR__ . '/../' . ltrim($old, '/'))) {
     @unlink(__DIR__ . '/../' . ltrim($old, '/'));
 }
 
-// Update database
-$stmt = $db->prepare("UPDATE users SET avatar_path = :path, updated_at = NOW() WHERE user_id = :id");
-$stmt->execute(['path' => '/uploads/avatars/' . $filename, 'id' => $userId]);
+// FIXED: Save path WITHOUT leading slash so the <base> tag in header.php resolves it correctly
+$relativePath = 'uploads/avatars/' . $filename;
 
-// Update session username display if needed
-$_SESSION['avatar_path'] = '/uploads/avatars/' . $filename;
+$stmt = $db->prepare("UPDATE users SET avatar_path = :path, updated_at = NOW() WHERE user_id = :id");
+$stmt->execute(['path' => $relativePath, 'id' => $userId]);
+
+$_SESSION['avatar_path'] = $relativePath;
 
 echo json_encode([
     'success' => true,
-    'path' => '/uploads/avatars/' . $filename
+    'path' => $relativePath
 ]);

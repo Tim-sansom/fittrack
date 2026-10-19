@@ -215,7 +215,8 @@
             if (savedRoute) currentPage = savedRoute;
 
             console.log('MPA->SPA redirecting to:', currentPage);
-            window.location.href = '../spa/index.php#' + currentPage;
+            // FIXED: Use absolute path from web root to prevent 404s in subdirectory
+            window.location.href = '/COM6011/public/spa/index.php#' + currentPage;
         } else {
             // Switching SPA -> MPA
             const hash = window.location.hash.replace('#', '');
@@ -229,7 +230,8 @@
             }
 
             console.log('SPA->MPA redirecting to:', currentPage);
-            window.location.href = '../' + currentPage + '.php';
+            // FIXED: Use absolute path from web root to prevent 404s in subdirectory
+            window.location.href = '/COM6011/public/' + currentPage + '.php';
         }
     });
 })();
