@@ -80,7 +80,9 @@ require_once __DIR__ . '/includes/sidebar.php';
     <!-- Activity Heatmap -->
     <div class="card" style="margin-bottom: 2rem;">
         <h3>Activity Consistency (Last 365 Days)</h3>
-        <div id="heatmapGrid" class="heatmap-grid" data-tooltip="Visualises your daily activity over the past year. Darker squares indicate more activity."></div>
+        <div style="overflow-x: auto; -webkit-overflow-scrolling: touch;">
+            <div id="heatmapGrid" class="heatmap-grid" data-tooltip="Visualises your daily activity over the past year. Darker squares indicate more activity."></div>
+        </div>
         <div class="heatmap-legend">
             <span>Less</span>
             <div class="legend-box"></div>

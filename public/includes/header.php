@@ -17,6 +17,7 @@
  * - All user output escaped with htmlspecialchars().
  */
 declare(strict_types=1);
+
 if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
@@ -118,6 +119,7 @@ if ($userId > 0) {
         ");
         $calStmt->execute(['uid' => $userId, 'tid' => $tenantId]);
         $upcomingEvents = $calStmt->fetchAll(PDO::FETCH_ASSOC);
+
     } catch (Exception $e) {
         // Silently fail - header widgets are non-critical
         $notifications = [];
@@ -131,9 +133,7 @@ $initialDateTime = date('D j M, H:i');
 <!DOCTYPE html>
 <html lang="en-GB" data-theme="light">
 <head>
-    <!-- SILVER BULLET: Forces all relative URLs to resolve from your project folder -->
     <base href="/COM6011/public/">
-    
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title><?= isset($pageTitle) ? htmlspecialchars($pageTitle) . ' | ' : '' ?>FitTrack</title>
@@ -144,8 +144,11 @@ $initialDateTime = date('D j M, H:i');
 <div class="app-grid-layout">
     <!-- Top Header: Spans full width -->
     <header class="top-header">
+        
+        <!-- LEFT SIDE: Hamburger & Title -->
         <div class="header-left">
-            <button class="mobile-sidebar-toggle" id="mobileSidebarToggle" aria-label="Toggle sidebar">
+            <!-- Mobile Hamburger Menu Toggle -->
+            <button class="mobile-sidebar-toggle" id="mobileSidebarToggle" aria-label="Toggle sidebar" type="button">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                     <line x1="3" y1="12" x2="21" y2="12"></line>
                     <line x1="3" y1="6" x2="21" y2="6"></line>
@@ -157,6 +160,8 @@ $initialDateTime = date('D j M, H:i');
                 <span class="live-datetime" id="liveDateTime"><?= $initialDateTime ?></span>
             </div>
         </div>
+        
+        <!-- RIGHT SIDE: Actions, Theme, Profile (All grouped here to push to the right) -->
         <div class="header-right">
             <div class="header-actions">
                 <!-- SPA/MPA Architecture Toggle -->
@@ -239,112 +244,40 @@ $initialDateTime = date('D j M, H:i');
                         <a href="workouts.php" class="dropdown-footer">View Workouts</a>
                     </div>
                 </div>
-
-                <!-- Theme Toggle -->
-                <button class="icon-btn" id="themeToggle" aria-label="Toggle dark mode" title="Toggle theme" data-tooltip="Toggle between light and dark mode">
-                    <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <circle cx="12" cy="12" r="5"/>
-                        <line x1="12" y1="1" x2="12" y2="3"></line>
-                        <line x1="12" y1="21" x2="12" y2="23"></line>
-                        <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
-                        <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
-                        <line x1="1" y1="12" x2="3" y2="12"></line>
-                        <line x1="21" y1="12" x2="23" y2="12"></line>
-                        <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
-                        <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
-                    </svg>
-                    <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
-                    </svg>
-                </button>
             </div>
 
-            <!-- User Profile Pill -->
+            <!-- Theme Toggle -->
+            <button class="icon-btn" id="themeToggle" aria-label="Toggle dark mode" title="Toggle theme" data-tooltip="Toggle between light and dark mode" type="button">
+                <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="5"/>
+                    <line x1="12" y1="1" x2="12" y2="3"></line>
+                    <line x1="12" y1="21" x2="12" y2="23"></line>
+                    <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+                    <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+                    <line x1="1" y1="12" x2="3" y2="12"></line>
+                    <line x1="21" y1="12" x2="23" y2="12"></line>
+                    <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+                    <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+                </svg>
+                <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+                </svg>
+            </button>
+
+            <!-- User Profile Pill (Grouped inside header-right to align to the far right) -->
             <a href="profile.php" class="user-profile-pill" title="View profile" data-tooltip="View and edit your profile">
-                <?php 
+                <?php
                 // Strip leading slash so the <base> tag resolves the path correctly
                 $cleanAvatarPath = $avatarPath ? ltrim($avatarPath, '/') : null;
-                
                 // Check if the file physically exists on the server to prevent broken image icons
                 $fileExists = $cleanAvatarPath && file_exists(__DIR__ . '/../' . $cleanAvatarPath);
                 ?>
-                
                 <?php if ($fileExists): ?>
                     <img src="<?= htmlspecialchars($cleanAvatarPath) ?>" alt="Avatar" class="avatar-circle avatar-img">
                 <?php else: ?>
                     <div class="avatar-circle"><?= htmlspecialchars($initials) ?></div>
                 <?php endif; ?>
-                
                 <span class="user-display-name"><?= htmlspecialchars($username) ?></span>
             </a>
         </div>
     </header>
-
-    <!-- SPA/MPA Toggle Logic (FIXED: Syncs labels with toggle state) -->
-    <script>
-    document.addEventListener('DOMContentLoaded', function() {
-        const toggle = document.getElementById('spaModeToggle');
-        const mpaLabel = document.getElementById('mpaLabel');
-        const spaLabel = document.getElementById('spaLabel');
-        
-        if (toggle) {
-            // Get current mode from session
-            const currentMode = '<?= htmlspecialchars($_SESSION['spa_mode'] ?? 'mpa') ?>';
-            
-            // Set toggle state to match session
-            toggle.checked = currentMode === 'spa';
-            
-            // Sync label highlights with toggle state
-            if (currentMode === 'spa') {
-                mpaLabel.classList.remove('active');
-                spaLabel.classList.add('active');
-            } else {
-                mpaLabel.classList.add('active');
-                spaLabel.classList.remove('active');
-            }
-
-            toggle.addEventListener('change', function() {
-                const currentPage = '<?= htmlspecialchars($currentPage ?? 'dashboard') ?>';
-                
-                if (this.checked) {
-                    // Switching to SPA Mode: update labels and redirect
-                    mpaLabel.classList.remove('active');
-                    spaLabel.classList.add('active');
-                    window.location.href = 'spa/index.php?page=' + currentPage;
-                } else {
-                    // Switching to MPA Mode: update labels and redirect
-                    mpaLabel.classList.add('active');
-                    spaLabel.classList.remove('active');
-                    window.location.href = currentPage + '.php';
-                }
-            });
-        }
-    });
-    </script>
-
-    <!-- Client-side Session Timeout Checker -->
-    <script>
-    (function() {
-        const sessionTimeout = 1800000; // 30 minutes in milliseconds
-        const checkInterval = 60000; // Check every minute
-        
-        let lastActivity = Date.now();
-        
-        // Track user activity to reset the timer
-        function updateActivity() {
-            lastActivity = Date.now();
-        }
-        
-        // Listen for user activity
-        ['click', 'keypress', 'scroll', 'mousemove', 'touchstart'].forEach(function(event) {
-            document.addEventListener(event, updateActivity, true);
-        });
-        
-        // Check for session timeout periodically
-        setInterval(function() {
-            if (Date.now() - lastActivity > sessionTimeout) {
-                window.location.href = 'login.php?timeout=1';
-            }
-        }, checkInterval);
-    })();
-    </script>

@@ -73,6 +73,7 @@ input::placeholder, textarea::placeholder {
     display: flex;
     justify-content: space-between;
     align-items: center;
+    flex-wrap: nowrap; /* CRITICAL: Prevents header items from dropping to the next line */
     padding: 0 2rem;
     position: sticky;
     top: 0;
@@ -111,16 +112,27 @@ input::placeholder, textarea::placeholder {
 /* =========================================
    TOP HEADER COMPONENTS
 ========================================= */
-.header-left { display: flex; align-items: center; gap: 1rem; }
+.header-left { 
+    display: flex; 
+    align-items: center; 
+    gap: 1rem; 
+    flex-shrink: 0; /* Prevents the left side from squashing */
+}
 .header-title-group { display: flex; flex-direction: column; }
 .page-heading { font-size: 1.25rem; font-weight: 700; margin: 0; color: var(--text); }
 .live-datetime { font-size: 0.875rem; color: var(--text); font-weight: 500; }
-.header-right { display: flex; align-items: center; gap: 1.5rem; }
+.header-right { 
+    display: flex; 
+    align-items: center; 
+    gap: 1.5rem; 
+    flex-shrink: 0; /* Prevents the right side from squashing */
+}
 .header-actions { display: flex; gap: 0.5rem; }
 .icon-btn {
     background: transparent; border: none; color: var(--text);
     width: 36px; height: 36px; border-radius: 50%; cursor: pointer;
     display: flex; align-items: center; justify-content: center; transition: all 0.2s ease;
+    flex-shrink: 0;
 }
 .icon-btn:hover { background: var(--bg); color: var(--accent); }
 .icon-btn svg { width: 20px; height: 20px; }
@@ -131,6 +143,7 @@ input::placeholder, textarea::placeholder {
     background: var(--bg); padding: 0.25rem 1rem 0.25rem 0.25rem;
     border-radius: 50px; border: 1px solid var(--border);
     text-decoration: none;
+    flex-shrink: 0; /* Prevents the profile pill from squashing */
 }
 .avatar-circle {
     width: 32px; height: 32px; border-radius: 50%;
@@ -616,8 +629,6 @@ textarea { resize: vertical; min-height: 100px; }
 /* =========================================
    MODAL COMPONENTS
 ========================================= */
-/* FIXED: Changed default display to 'none' so modals do not appear on page load.
-   The .active class toggles it to 'flex' via JavaScript. */
 .modal-overlay {
     position: fixed; top: 0; left: 0; width: 100%; height: 100%;
     background: rgba(0, 0, 0, 0.7); display: none; justify-content: center; align-items: center;
@@ -897,6 +908,7 @@ textarea { resize: vertical; min-height: 100px; }
     .dashboard-grid { grid-template-columns: 1fr; }
     .charts-grid { grid-template-columns: 1fr; }
 }
+
 @media (max-width: 900px) {
     .community-grid { grid-template-columns: 1fr; }
     .profile-grid { grid-template-columns: 1fr; gap: 2rem; }
@@ -907,20 +919,109 @@ textarea { resize: vertical; min-height: 100px; }
     .chart-summary-row { grid-template-columns: repeat(2, 1fr); }
     .calorie-breakdown { flex-direction: column; }
 }
+
 @media (max-width: 768px) {
-    .app-grid-layout { grid-template-columns: 1fr; grid-template-rows: var(--header-height) 1fr auto; }
-    .sidebar {
-        grid-column: 1; grid-row: 2; position: fixed; left: -260px;
-        top: var(--header-height); height: calc(100vh - var(--header-height));
-        transition: left 0.3s ease; z-index: 100; width: var(--sidebar-width) !important;
+    /* Grid layout changes */
+    .app-grid-layout { 
+        grid-template-columns: 1fr; 
+        grid-template-rows: var(--header-height) 1fr auto; 
     }
-    .sidebar.mobile-open { left: 0; }
-    .sidebar.collapsed .logo-text, .sidebar.collapsed .nav-text { display: block; width: auto; }
-    .top-header { grid-column: 1; padding: 0 1rem; }
-    .main-content { grid-column: 1; padding: 1rem; }
-    .site-footer { grid-column: 1; }
-    .mobile-sidebar-toggle { display: flex; background: none; border: none; color: var(--text); cursor: pointer; }
-    .user-display-name { display: none; }
+    
+    /* Sidebar becomes fixed and hidden off-screen */
+    .sidebar {
+        grid-column: 1; 
+        grid-row: 2; 
+        position: fixed; 
+        left: -260px;
+        top: var(--header-height); 
+        height: calc(100vh - var(--header-height));
+        transition: left 0.3s ease; 
+        z-index: 100; 
+        width: var(--sidebar-width) !important;
+    }
+    
+    .sidebar.mobile-open { 
+        left: 0 !important; 
+        box-shadow: 4px 0 15px rgba(0,0,0,0.2);
+    }
+    
+    .sidebar.collapsed .logo-text, 
+    .sidebar.collapsed .nav-text { 
+        display: block; 
+        width: auto; 
+    }
+    
+    /* CRITICAL: Force header to stay as a flex row on mobile */
+    .top-header { 
+        grid-column: 1; 
+        padding: 0 0.5rem !important;
+        display: flex !important;
+        justify-content: space-between !important;
+        align-items: center !important;
+        flex-wrap: nowrap !important;
+        gap: 0.5rem;
+    }
+    
+    .header-left {
+        display: flex !important;
+        align-items: center !important;
+        gap: 0.5rem !important;
+        min-width: 0;
+        flex-shrink: 0;
+    }
+    
+    .header-right {
+        display: flex !important;
+        align-items: center !important;
+        gap: 0.5rem !important;
+        flex-shrink: 0;
+    }
+    
+    .header-actions {
+        display: flex !important;
+        gap: 0.25rem !important;
+    }
+    
+    /* Show hamburger menu */
+    .mobile-sidebar-toggle { 
+        display: flex !important;
+        align-items: center;
+        justify-content: center;
+        background: none; 
+        border: none; 
+        color: var(--text); 
+        cursor: pointer;
+        width: 36px;
+        height: 36px;
+        flex-shrink: 0;
+    }
+    
+    .mobile-sidebar-toggle svg {
+        width: 24px;
+        height: 24px;
+    }
+    
+    /* Hide username on mobile, keep avatar */
+    .user-display-name { 
+        display: none !important; 
+    }
+    
+    .user-profile-pill {
+        padding: 0.25rem;
+        gap: 0.25rem;
+    }
+    
+    /* Content areas */
+    .main-content { 
+        grid-column: 1; 
+        padding: 1rem; 
+    }
+    
+    .site-footer { 
+        grid-column: 1; 
+    }
+    
+    /* Other responsive adjustments */
     .stats-row { grid-template-columns: 1fr; }
     .progress-charts-row { grid-template-columns: 1fr; }
     .workout-type-grid { grid-template-columns: repeat(2, 1fr); }
@@ -934,11 +1035,41 @@ textarea { resize: vertical; min-height: 100px; }
     .settings-grid { grid-template-columns: 1fr; }
     .settings-tabs { overflow-x: auto; }
 }
+
 @media (max-width: 600px) {
     .form-grid-2, .form-grid-3 { grid-template-columns: 1fr; }
     .chart-summary-row { grid-template-columns: 1fr; }
     .quick-log-grid { grid-template-columns: repeat(2, 1fr); }
     .mini-heatmap { grid-template-columns: repeat(7, 1fr); gap: 0.25rem; }
+    
+    /* Smaller screens - further reduce header spacing */
+    .header-left {
+        gap: 0.25rem !important;
+    }
+    
+    .header-right {
+        gap: 0.25rem !important;
+    }
+    
+    .page-heading {
+        font-size: 1rem;
+    }
+}
+
+/* Desktop - ensure everything shows correctly */
+@media (min-width: 769px) {
+    .mobile-sidebar-toggle {
+        display: none !important;
+    }
+    
+    .user-display-name {
+        display: inline !important;
+    }
+    
+    .top-header {
+        display: flex !important;
+        justify-content: space-between !important;
+    }
 }
 
 /* =========================================
@@ -1124,21 +1255,21 @@ input:checked + .slider:before { transform: translateX(16px); }
    GLOBAL TOOLTIP STYLES
 ========================================= */
 .global-tooltip {
-    position: fixed; /* CRITICAL: fixed to follow mouse */
+    position: fixed;
     background: var(--text);
     color: var(--bg);
     padding: 0.5rem 0.75rem;
     border-radius: 6px;
     font-size: 0.8rem;
     font-weight: 500;
-    pointer-events: none; /* CRITICAL: Prevents tooltip from blocking mouse events */
+    pointer-events: none;
     opacity: 0;
     transition: opacity 0.1s ease;
-    z-index: 99999; /* Very high z-index to sit above charts */
+    z-index: 99999;
     max-width: 250px;
     line-height: 1.4;
     box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-    transform: translate(0, 0); /* Reset any transforms */
+    transform: translate(0, 0);
 }
 .global-tooltip.visible {
     opacity: 1;
