@@ -1,0 +1,32 @@
+# =============================================================================
+# Docker Ignore File
+# Prevents unnecessary files from being sent to the Docker build context.
+# =============================================================================
+
+# Version control
+.git
+.gitignore
+
+# IDE and editor files
+.vscode
+.idea
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Environment files (Never commit real credentials)
+.env
+
+# Documentation and assignment specific files
+*.docx
+*.pdf
+*.md
+docs/
+
+# Docker files themselves (not needed inside the container)
+Dockerfile
+docker-compose.yml
+.dockerignore

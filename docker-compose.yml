@@ -1,64 +1,89 @@
+# =============================================================================
+# FitTrack Docker Compose Configuration
+# Defines the services, networks, and volumes for the self-hosted deployment.
+# =============================================================================
+
+version: '3.8'
+
 services:
+  # ---------------------------------------------------------------------------
+  # Web Service (Apache + PHP 8.4)
+  # ---------------------------------------------------------------------------
   web:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: uni-web
+    container_name: fittrack_web
     restart: unless-stopped
-    env_file:
-      - .env
-    environment:
-      DB_HOST: database
-      DB_PORT: 3306
-      DB_DATABASE: ${DB_DATABASE}
-      DB_USER: ${DB_USER}
-      DB_PASSWORD: ${DB_PASSWORD}
-    volumes:
-      - ./:/var/www/html
     ports:
-      - "127.0.0.1:${APP_PORT:-8081}:80"
+      # Dynamically maps the APP_PORT from .env to container port 80.
+      # Defaults to 8080 if APP_PORT is not set in .env.
+      - "${APP_PORT:-8080}:80"
+    volumes:
+      # Mount the application code for live development.
+      - .:/var/www/html
+      # Persist user-generated content (avatars, uploads) across container rebuilds.
+      - fittrack_uploads:/var/www/html/uploads
+    environment:
+      # Pass environment variables from the .env file to the PHP application.
+      - DB_HOST=${DB_HOST}
+      - DB_PORT=${DB_PORT}
+      - DB_DATABASE=${DB_DATABASE}
+      - DB_USER=${DB_USER}
+      - DB_PASSWORD=${DB_PASSWORD}
     depends_on:
+      # Ensure the database service is started and ready before the web service.
       database:
         condition: service_healthy
+    networks:
+      - fittrack_network
 
+  # ---------------------------------------------------------------------------
+  # Database Service (MariaDB 11.4)
+  # ---------------------------------------------------------------------------
   database:
     image: mariadb:11.4
-    container_name: uni-database
+    container_name: fittrack_database
     restart: unless-stopped
-    env_file:
-      - .env
-    environment:
-      MARIADB_DATABASE: ${DB_DATABASE}
-      MARIADB_USER: ${DB_USER}
-      MARIADB_PASSWORD: ${DB_PASSWORD}
-      MARIADB_ROOT_PASSWORD: ${DB_ROOT_PASSWORD}
-      MARIADB_CHARACTER_SET_SERVER: utf8mb4
-      MARIADB_COLLATION_SERVER: utf8mb4_unicode_ci
-    volumes:
-      - mariadb_data:/var/lib/mysql
-      - ./docker/mariadb/init:/docker-entrypoint-initdb.d:ro
     ports:
-      - "127.0.0.1:${DB_PORT:-3307}:3306"
+      # Expose port 3306 for external database management tools if required.
+      - "3306:3306"
+    environment:
+      # Root password for the MariaDB instance.
+      - MYSQL_ROOT_PASSWORD=${DB_ROOT_PASSWORD}
+      # Automatically create the application database on first run.
+      - MYSQL_DATABASE=${DB_DATABASE}
+      # Create the application user and grant privileges.
+      - MYSQL_USER=${DB_USER}
+      - MYSQL_PASSWORD=${DB_PASSWORD}
+    volumes:
+      # Persist the actual database data across container restarts and rebuilds.
+      - fittrack_db_data:/var/lib/mysql
+      # Automatically execute SQL scripts in this directory on first startup.
+      # This seeds the database with the schema and dummy data.
+      - ./fittrack_database_schema.sql:/docker-entrypoint-initdb.d/01-schema.sql
+      - ./fittrack_dummy_data.sql:/docker-entrypoint-initdb.d/02-dummy-data.sql
+    networks:
+      - fittrack_network
     healthcheck:
+      # Ensures the web container waits until the database is fully ready to accept connections.
       test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
       interval: 10s
       timeout: 5s
-      retries: 10
-      start_period: 30s
+      retries: 5
 
-  phpmyadmin:
-    image: phpmyadmin/phpmyadmin:latest
-    container_name: uni-pma
-    restart: unless-stopped
-    environment:
-      PMA_HOST: database
-      PMA_PORT: 3306
-      UPLOAD_LIMIT: 64M
-    ports:
-      - "127.0.0.1:${PMA_PORT:-8089}:80"
-    depends_on:
-      database:
-        condition: service_healthy
-
+# =============================================================================
+# Volumes
+# =============================================================================
 volumes:
-  mariadb_data:
+  fittrack_db_data:
+    driver: local
+  fittrack_uploads:
+    driver: local
+
+# =============================================================================
+# Networks
+# =============================================================================
+networks:
+  fittrack_network:
+    driver: bridge
