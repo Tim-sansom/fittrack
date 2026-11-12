@@ -28,25 +28,25 @@
 <table>
   <tr>
     <td align="center">
-      <img src="screeshots/dashboard.png" alt="FitTrack Dashboard" style="border-radius: 12px; box-shadow: 0 8px 32px rgba(0,0,0,0.1); width: 100%; max-width: 800px;">
+      <img src="screenshots/dashboard.png" alt="FitTrack Dashboard" style="border-radius: 12px; box-shadow: 0 8px 32px rgba(0,0,0,0.1); width: 100%; max-width: 800px;">
       <br><em>Command Centre Dashboard with custom SVG analytics</em>
     </td>
   </tr>
   <tr>
     <td align="center">
-      <img src="screeshots/workouts.png" alt="Workouts Page" style="border-radius: 12px; box-shadow: 0 8px 32px rgba(0,0,0,0.1); width: 100%; max-width: 800px; margin-top: 20px;">
+      <img src="screenshots/workouts.png" alt="Workouts Page" style="border-radius: 12px; box-shadow: 0 8px 32px rgba(0,0,0,0.1); width: 100%; max-width: 800px; margin-top: 20px;">
       <br><em>Workout logging with time-range analytics and CRUD operations</em>
     </td>
   </tr>
   <tr>
     <td align="center">
-      <img src="screeshots/progress.png" alt="Progress Tracking" style="border-radius: 12px; box-shadow: 0 8px 32px rgba(0,0,0,0.1); width: 100%; max-width: 800px; margin-top: 20px;">
+      <img src="screenshots/progress.png" alt="Progress Tracking" style="border-radius: 12px; box-shadow: 0 8px 32px rgba(0,0,0,0.1); width: 100%; max-width: 800px; margin-top: 20px;">
       <br><em>Body measurements and performance scorecards</em>
     </td>
   </tr>
   <tr>
     <td align="center">
-      <img src="screeshots/meal-plans.png" alt="Meal Planner" style="border-radius: 12px; box-shadow: 0 8px 32px rgba(0,0,0,0.1); width: 100%; max-width: 800px; margin-top: 20px;">
+      <img src="screenshots/meal-plans.png" alt="Meal Planner" style="border-radius: 12px; box-shadow: 0 8px 32px rgba(0,0,0,0.1); width: 100%; max-width: 800px; margin-top: 20px;">
       <br><em>Weekly meal planning and nutrition management</em>
     </td>
   </tr>
